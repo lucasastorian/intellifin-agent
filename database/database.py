@@ -39,6 +39,15 @@ class Database:
                 "SQLite was built without JSON1; required for JSON array contains filters."
             ) from e
 
+        # Register REGEXP function for regex_search (case-insensitive by default)
+        import re
+        def _sqlite_regexp(pattern, text):
+            try:
+                return 1 if re.search(pattern, text or "", re.IGNORECASE) else 0
+            except re.error:
+                return 0
+        self.conn.create_function("REGEXP", 2, _sqlite_regexp)
+
         # Enable FK constraints and performance/reliability settings
         self.conn.execute("PRAGMA foreign_keys = ON;")
         self.conn.execute("PRAGMA journal_mode = WAL;")
@@ -77,6 +86,21 @@ class Database:
         # Validate table exists
         self.schema.get_table(name)
         return TableQueryBuilder(self, self.schema, name)
+
+    def rebuild_fts(self, table: str, column: str):
+        """Rebuild FTS index for a specific column.
+
+        Args:
+            table: Table name
+            column: Column name with fts=True
+
+        Note:
+            Currently a stub for future implementation. FTS tables are created
+            via schema migrations and maintained automatically via triggers.
+        """
+        # TODO: Implement manual FTS rebuild
+        # Could be used to rebuild after adding fts=True to existing populated table
+        pass
 
     def _now_iso(self) -> str:
         """Return current UTC timestamp in ISO 8601 format"""

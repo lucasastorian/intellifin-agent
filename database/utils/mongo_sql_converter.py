@@ -15,6 +15,8 @@ class MongoToSqlConverter:
 
     def __init__(self, schema: Schema):
         self.schema = schema
+        self._fts_rank_exprs = []  # list of (field, expr_sql, param)
+        self._order_rank_forced = False
 
     def _quote_identifier(self, identifier: str) -> str:
         """Quote SQL identifier with backticks for safety"""
@@ -87,6 +89,8 @@ class MongoToSqlConverter:
             SQL SELECT statement
         """
         self._current_table = table
+        self._fts_rank_exprs = []
+        self._order_rank_forced = False
         table_alias = table[0]
 
         # Build columns
@@ -103,8 +107,16 @@ class MongoToSqlConverter:
         if where_sql:
             sql += f" WHERE {where_sql}"
 
-        # Build ORDER BY
-        if sort:
+        # Build ORDER BY (with BM25 ranking for FTS)
+        if self._fts_rank_exprs:
+            # Enforce ranking: use the last keyword search added
+            _, rank_expr_sql, rank_param = self._fts_rank_exprs[-1]
+            sql += f" ORDER BY {rank_expr_sql} ASC"
+            self._order_rank_forced = True
+            # Append bm25 param AFTER the WHERE params
+            self._last_select_params.append(rank_param)
+        elif sort:
+            # Only apply ORDER BY when no keyword search exists
             order_sql = self.build_order_by_sql(sort, table_alias)
             if order_sql:
                 sql += f" ORDER BY {order_sql}"
@@ -253,6 +265,62 @@ class MongoToSqlConverter:
                         clauses.append(f"{sql_field} LIKE ? COLLATE NOCASE")
                         params.append(val)
 
+                    elif op == "$keyword":
+                        # Validate FTS-enabled
+                        tbl = self.schema.get_table(self._current_table)
+                        fields = tbl.get_fields()
+                        fd = fields.get(field)
+                        if not getattr(fd, "fts", False):
+                            raise ValueError(f"Field '{field}' is not FTS-enabled (fts=True) on '{tbl.__tablename__}'")
+
+                        # Normalize to bag-of-words AND semantics
+                        match = " ".join(str(val).split())
+                        if not match:
+                            # Empty query should match nothing
+                            clauses.append("1=0")
+                            continue
+
+                        pk = self._get_primary_key_field(tbl.__tablename__)
+                        fts_table_name = f"{tbl.__tablename__}__{field}__fts"
+                        fts_table = f"`{fts_table_name}`"
+                        alias = table_alias or tbl.__tablename__[0]
+
+                        # Filter via EXISTS
+                        clauses.append(
+                            f"EXISTS (SELECT 1 FROM {fts_table} f "
+                            f"WHERE f.rowid = {alias}.`{pk}` AND f MATCH ?)"
+                        )
+                        params.append(match)
+
+                        # Stash bm25() expression for ORDER BY injection later
+                        rank_expr = (
+                            f"(SELECT bm25(f) FROM {fts_table} f "
+                            f"WHERE f.rowid = {alias}.`{pk}` AND f MATCH ?)"
+                        )
+                        self._fts_rank_exprs.append((field, rank_expr, match))
+
+                    elif op == "$regex":
+                        pattern = str(val)
+                        # Separate regex vs glob metacharacters
+                        regex_meta = set('.^$()+{}|\\')
+                        glob_meta = set('*?[]')
+                        has_regex = any(ch in regex_meta for ch in pattern)
+                        has_glob = any(ch in glob_meta for ch in pattern)
+
+                        if has_regex:
+                            # Use REGEXP
+                            clauses.append(f"{sql_field} REGEXP ?")
+                            params.append(pattern)
+                        elif has_glob:
+                            # Use GLOB for simple wildcards
+                            clauses.append(f"{sql_field} GLOB ?")
+                            params.append(pattern)
+                        else:
+                            # Fallback to LIKE with escaping
+                            escaped = self._escape_like(pattern)
+                            clauses.append(f"{sql_field} LIKE ? ESCAPE '\\' COLLATE NOCASE")
+                            params.append(f"%{escaped}%")
+
                     elif op in {"$gt", "$gte", "$lt", "$lte", "$eq", "$ne"}:
                         cmp_map = {
                             "$gt": ">", "$gte": ">=", "$lt": "<",
@@ -334,6 +402,12 @@ class MongoToSqlConverter:
     @staticmethod
     def escape_quotes(s: str) -> str:
         return s.replace("'", "''")
+
+    @staticmethod
+    def _escape_like(s: str) -> str:
+        """Escape LIKE wildcards in pattern"""
+        # Escape backslash first, then % and _
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def convert_insert(self, mongo_obj: dict) -> str:
         """

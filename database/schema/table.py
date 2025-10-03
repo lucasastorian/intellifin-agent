@@ -203,7 +203,72 @@ class Table(metaclass=TableMeta):
 
         full_sql = base_sql + "\n" + "\n".join(indices)
 
+        # Append per-column FTS DDL
+        fts_sql = cls._generate_fts_sql()
+        if fts_sql:
+            full_sql += "\n" + fts_sql
+
         return full_sql
+
+    @classmethod
+    def _generate_fts_sql(cls) -> str:
+        """Generate FTS5 virtual tables and triggers for Text fields with fts=True"""
+        from .fields import Text
+
+        fts_chunks = []
+
+        # Find primary key
+        pk_field = None
+        for name, field in cls.get_fields().items():
+            if not field.primary_key:
+                continue
+            pk_field = name
+            break
+
+        # Generate FTS for each Text field with fts=True
+        for col, field in cls.get_fields().items():
+            if not isinstance(field, Text):
+                continue
+            if not getattr(field, "fts", False):
+                continue
+
+            # Validate PK exists for this FTS field
+            if not pk_field:
+                raise ValueError(f"Table '{cls.__tablename__}' requires a primary key for FTS content_rowid.")
+
+            base = cls.__tablename__
+            fts = f"`{base}__{col}__fts`"
+
+            # VIRTUAL TABLE
+            fts_chunks.append(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts}\n"
+                f"USING fts5(\n"
+                f"  `{col}`,\n"
+                f"  content='{base}',\n"
+                f"  content_rowid='{pk_field}',\n"
+                f"  tokenize='unicode61 remove_diacritics 2 tokenchars \"-._%\"'\n"
+                f");"
+            )
+
+            # Triggers
+            fts_chunks.append(
+                f"CREATE TRIGGER IF NOT EXISTS `{base}__{col}__fts_ai` AFTER INSERT ON `{base}` BEGIN\n"
+                f"  INSERT INTO {fts}(rowid, `{col}`) VALUES (new.`{pk_field}`, new.`{col}`);\n"
+                f"END;"
+            )
+            fts_chunks.append(
+                f"CREATE TRIGGER IF NOT EXISTS `{base}__{col}__fts_ad` AFTER DELETE ON `{base}` BEGIN\n"
+                f"  INSERT INTO {fts}({fts}, rowid, `{col}`) VALUES('delete', old.`{pk_field}`, old.`{col}`);\n"
+                f"END;"
+            )
+            fts_chunks.append(
+                f"CREATE TRIGGER IF NOT EXISTS `{base}__{col}__fts_au` AFTER UPDATE OF `{col}` ON `{base}` BEGIN\n"
+                f"  INSERT INTO {fts}({fts}, rowid, `{col}`) VALUES('delete', old.`{pk_field}`, old.`{col}`);\n"
+                f"  INSERT INTO {fts}(rowid, `{col}`) VALUES (new.`{pk_field}`, new.`{col}`);\n"
+                f"END;"
+            )
+
+        return "\n".join(fts_chunks) if fts_chunks else ""
 
     def validate_insert_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate insert data against table schema"""

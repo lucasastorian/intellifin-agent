@@ -119,3 +119,11 @@ class TableQueryBuilder:
     def is_not_null(self, field: str) -> SelectQueryBuilder:
         """Filter where field is NOT NULL (auto-starts SELECT)"""
         return self.select().is_not_null(field)
+
+    def keyword_search(self, field: str, text: str) -> SelectQueryBuilder:
+        """Full-text search using FTS5 with BM25 ranking (auto-starts SELECT)"""
+        return self.select().keyword_search(field, text)
+
+    def regex_search(self, field: str, pattern: str) -> SelectQueryBuilder:
+        """Pattern search using REGEXP/GLOB/LIKE (auto-starts SELECT)"""
+        return self.select().regex_search(field, pattern)

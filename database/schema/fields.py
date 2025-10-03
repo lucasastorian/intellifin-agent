@@ -141,18 +141,26 @@ class Serial(FieldDescriptor):
 
 
 class Text(FieldDescriptor):
-    def __init__(self, index: bool = False, **kwargs):
+    def __init__(self, index: bool = False, fts: bool = False, **kwargs):
         super().__init__("TEXT", index=index, **kwargs)
+        self.fts = fts
 
     def _validate_type(self, value: Any) -> str:
         """Validate and convert value to string"""
         return str(value)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize field descriptor to dictionary"""
+        data = super().to_dict()
+        data['fts'] = self.fts
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Text':
         """Deserialize field descriptor from dictionary"""
         return cls(
             index=data['index'],
+            fts=data.get('fts', False),
             primary_key=data['primary_key'],
             nullable=data['nullable'],
             default=data['default'],
