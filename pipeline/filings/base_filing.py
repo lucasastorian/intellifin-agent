@@ -1,0 +1,88 @@
+from typing import Optional
+from bs4 import BeautifulSoup
+from abc import ABC, abstractmethod
+from edgar.entity.filings import EntityFiling
+from edgar.xbrl import XBRL
+
+from database.database import Database
+from pipeline.parsers.parser import Parser
+
+
+class BaseFiling(ABC):
+
+    def __init__(self, filing: EntityFiling, company_id: int, database: Database):
+        self.filing = filing
+        self.company_id = company_id
+        self.database = database
+
+        self.accession_number = filing.accession_number
+        self.report_date = filing.report_date
+        self.filing_date = filing.filing_date.strftime('%Y-%m-%d')
+
+    @abstractmethod
+    def upsert(self):
+        """Upserts the filing and associated data to local DB"""
+        raise NotImplementedError
+
+    def exists(self):
+        """Returns True if an entry for the filing exists in the DB"""
+        return len(self.database.table("filings").select("*").eq("accession_number", self.accession_number).execute()) > 0
+
+    @abstractmethod
+    def _upsert_filing(self, xbrl: XBRL):
+        """Upserts the filing to the local db"""
+        raise NotImplementedError
+
+    def _upsert_filing_pages(self, filing_id: int):
+        """Creates a record for the filing pages"""
+        html_content = self.filing.html()
+
+        parser = Parser(content=html_content)
+        pages = parser.get_pages()
+
+        response = self.database.table("filing_pages").upsert([{
+            "page": page['page'],
+            "content": page['content'],
+            "filing_id": filing_id,
+            "company_id": self.company_id
+        } for page in pages], on_conflict="filing_id,page").execute()
+
+    def _upsert_filing_notes(self, filing_id: int):
+        """Upserts all the notes associated with the filing"""
+        notes = self.filing.reports.get_by_category("Notes")
+        processed_notes = []
+
+        for note in notes:
+            note_content = self._flatten_note(content=note.content)
+            parser = Parser(content=note_content)
+            note_markdown = parser.markdown()
+            processed_notes.append({"title": note.short_name, "content": note_markdown,
+                                    "filename": note.html_file_name, "filing_id": filing_id,
+                                    "company_id": self.company_id})
+
+        self.database.table("filing_notes").upsert(processed_notes, on_conflict="filename,filing_id").execute()
+
+    @staticmethod
+    def _flatten_note(content: str) -> Optional[str]:
+        """Flattens the note structure by removing the outer table"""
+        soup = BeautifulSoup(content, 'lxml')
+        elements = []
+
+        body = soup.find("body")
+        if not body:
+            return None
+
+        table = body.find("table")
+        if table is None:
+            return None
+
+        for row in table.find_all('tr', recursive=False):
+            cells = row.find_all(['th', 'td'], recursive=False)
+
+            for cell in cells:
+                elements.append(cell)
+
+        if len(elements) == 0:
+            return None
+
+        return ''.join([str(element) for element in elements])
