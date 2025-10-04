@@ -27,7 +27,7 @@ class Filings(Table):
     items = JSONField(nullable=True)  # For 8-Ks: list of items like ["2.02", "9.01"]
     press_release = Boolean(default=False, nullable=False)
     fiscal_year = Integer(nullable=True, index=True)
-    fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'],  nullable=True)  # NOTE: 'Q4' isn't filed with SEC.
+    fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=True)  # NOTE: 'Q4' isn't filed with SEC.
     filing_date = Date(nullable=False)
     report_date = Date(nullable=True)
     accession_number = Text(nullable=False, unique=True, index=True)
@@ -43,17 +43,10 @@ class FinancialStatements(Table):
 
     id = Serial()
 
-    statement_type = Enum(choices=['income_statement', 'balance_sheet', 'cash_flow', 'equity_statement',
-                                   'comprehensive_income'], nullable=False, index=True)
+    type = Enum(choices=['income_statement', 'balance_sheet', 'cash_flow', 'equity_statement',
+                         'comprehensive_income'], nullable=False, index=True)
 
-    content = Text(nullable=False)  # Raw text if needed
-    sections = JSONField(nullable=False)  # Structured sections as JSON (NULL if not present)
-
-    report_date = Date(nullable=False, index=True)
-    fiscal_year = Integer(nullable=False, index=True)
-    fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=False, index=True)
-    inferred = Boolean(nullable=False, default=False)
-    edgar_link = Text(nullable=True)
+    data = JSONField(nullable=False)  # Structured sections as JSON (NULL if not present)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -110,6 +103,14 @@ class PressReleasePages(Table):
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
     __uniques__ = [("filing_id", "page")]
+
+
+class FinancialStatements(Table):
+    __tablename__ = "financial_statements"
+
+    id = Serial()
+
+    data = JSONField()
 
 
 schema = Schema()

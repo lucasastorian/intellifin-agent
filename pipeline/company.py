@@ -24,10 +24,27 @@ class Company:
 
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
-    def upsert(self) -> dict:
+    def sync(self) -> bool:
+        """Syncs a company and returns True if synced, and False if not found"""
+        if self.exists():
+            return True
+
+        if self.company.not_found:
+            return False
+
+        return self.upsert()
+
+    def upsert(self) -> bool:
         """Upserts a company into the companies table"""
+
         company_id = self._upsert_company()
         self._upsert_filings(company_id=company_id)
+
+        return True
+
+    def exists(self) -> bool:
+        """Returns True if the company exists in the DB"""
+        return len(self.database.table("companies").contains("symbols", self.symbol).limit(1).execute()) > 0
 
     def _upsert_filings(self, company_id: int):
         """Upserts ALL the filings for that company within a given date range"""
@@ -37,10 +54,6 @@ class Company:
             # NOTE: You will eventually want to add a ThreadPoolExecutor here...
             parser = self._get_filing_parser(filing=filing, company_id=company_id)
             parser.upsert()
-
-    def exists(self) -> bool:
-        """Returns True if the company exists in the DB"""
-        return len(self.database.table("companies").contains("symbols", self.symbol).limit(1).execute()) > 0
 
     def _upsert_company(self) -> int:
         """Upserts the company object and returns the company serial id"""

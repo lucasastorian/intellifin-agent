@@ -6,6 +6,7 @@ from edgar.xbrl import XBRL
 
 from database.database import Database
 from pipeline.parsers.parser import Parser
+from pipeline.parsers.financial_statement import FinancialStatements
 
 
 class BaseFiling(ABC):
@@ -61,6 +62,12 @@ class BaseFiling(ABC):
                                     "company_id": self.company_id})
 
         self.database.table("filing_notes").upsert(processed_notes, on_conflict="filename,filing_id").execute()
+
+    def _upsert_financial_statements(self, xbrl: XBRL, filing_id: int):
+        """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
+        statements = FinancialStatements(xbrl=xbrl, report_date=self.report_date, filing_id=filing_id,
+                                         company_id=self.company_id, database=self.database)
+        statements.upsert_statements()
 
     @staticmethod
     def _flatten_note(content: str) -> Optional[str]:

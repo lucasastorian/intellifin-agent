@@ -12,6 +12,7 @@ class FilingTwentyF(BaseFiling):
         filing_id = self._upsert_filing(xbrl=xbrl)
         self._upsert_filing_pages(filing_id=filing_id)
         self._upsert_filing_notes(filing_id=filing_id)
+        self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
