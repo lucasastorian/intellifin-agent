@@ -1,1 +1,12 @@
-.idea
+.idea/
+.vscode/
+
+__pycache__/
+
+venv/
+
+.env
+
+.local.db
+.local.db-shm
+.local.db-wal

@@ -1,4 +1,5 @@
 from typing import List, Set
+from pydantic import BaseModel
 from abc import ABC, abstractmethod
 
 from database.database import Database
@@ -8,8 +9,13 @@ from agent.message import Action
 
 class BaseAction(ABC):
 
-    def __init__(self, database: Database):
+    name: str
+    schema: BaseModel
+
+    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2015):
         self.database = database
+        self.edgar_user_agent = edgar_user_agent
+        self.start_year = start_year
 
     @abstractmethod
     async def call(self, action: Action):
@@ -21,7 +27,8 @@ class BaseAction(ABC):
         not_found = []
 
         for symbol in symbols:
-            company = Company(symbol=symbol, database=self.database)
+            company = Company(symbol=symbol, database=self.database, edgar_user_agent=self.edgar_user_agent,
+                              start_year=self.start_year)
             sync_successful = company.sync()
             if not sync_successful:
                 not_found.append(symbol)

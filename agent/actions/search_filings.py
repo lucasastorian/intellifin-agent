@@ -70,6 +70,9 @@ class SearchFilings(BaseModel):
 
 class SearchFilingsAction(BaseAction):
 
+    name: str = 'SearchFilings'
+    schema: SearchFilings
+
     async def call(self, action: Action):
         """Calls the search filings actions and returns a MD table of """
         try:
