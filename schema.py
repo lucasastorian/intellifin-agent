@@ -54,6 +54,8 @@ class FinancialStatements(Table):
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
+    __uniques__ = [("filing_id", "type")]
+
 
 class FilingNotes(Table):
     __tablename__ = "filing_notes"
@@ -62,7 +64,7 @@ class FilingNotes(Table):
 
     title = Text(nullable=False)
     filename = Text(nullable=False)
-    content = Text(nullable=False)
+    content = Text(nullable=False, fts=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -78,7 +80,7 @@ class FilingPages(Table):
 
     id = Serial()
     page = Integer(nullable=False, index=True)
-    content = Text(nullable=False)
+    content = Text(nullable=False, fts=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -94,7 +96,7 @@ class PressReleasePages(Table):
 
     id = Serial()
     page = Integer(nullable=False, index=True)
-    content = Text(nullable=False)
+    content = Text(nullable=False, fts=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -103,14 +105,6 @@ class PressReleasePages(Table):
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
     __uniques__ = [("filing_id", "page")]
-
-
-class FinancialStatements(Table):
-    __tablename__ = "financial_statements"
-
-    id = Serial()
-
-    data = JSONField()
 
 
 schema = Schema()

@@ -71,59 +71,111 @@ class TableQueryBuilder:
             default_to_null=default_to_null,
         )
 
-    # Filter pass-through methods for convenience (auto-creates SelectQueryBuilder)
-    def eq(self, field: str, value: Any) -> SelectQueryBuilder:
-        """Filter where field equals value (auto-starts SELECT)"""
-        return self.select().eq(field, value)
+    def keyword_search(self, query: str, column: Optional[str] = None, returning: Optional[str] = None) -> SelectQueryBuilder:
+        """Full-text search using FTS5 with BM25 ranking.
 
-    def neq(self, field: str, value: Any) -> SelectQueryBuilder:
-        """Filter where field does not equal value (auto-starts SELECT)"""
-        return self.select().neq(field, value)
+        Automatically detects the FTS-enabled column if only one exists.
+        If multiple FTS columns exist, you must specify which one via 'column' parameter.
 
-    def gt(self, field: str, value: Union[int, float]) -> SelectQueryBuilder:
-        """Filter where field is greater than value (auto-starts SELECT)"""
-        return self.select().gt(field, value)
+        Args:
+            query: Search text (will be split into bag-of-words AND query)
+            column: Optional column name to search (required if table has multiple FTS columns)
+            returning: Optional column selection (e.g., "id,content" or "*"). Defaults to "*"
 
-    def gte(self, field: str, value: Union[int, float]) -> SelectQueryBuilder:
-        """Filter where field is >= value (auto-starts SELECT)"""
-        return self.select().gte(field, value)
+        Returns:
+            SelectQueryBuilder for chaining
 
-    def lt(self, field: str, value: Union[int, float]) -> SelectQueryBuilder:
-        """Filter where field is less than value (auto-starts SELECT)"""
-        return self.select().lt(field, value)
+        Raises:
+            ValueError: If no FTS columns exist, multiple FTS columns exist without specifying 'column',
+                       or specified column is not FTS-enabled
 
-    def lte(self, field: str, value: Union[int, float]) -> SelectQueryBuilder:
-        """Filter where field is <= value (auto-starts SELECT)"""
-        return self.select().lte(field, value)
+        Examples:
+            # Auto-detect FTS column (table has only one)
+            db.table("filing_pages").keyword_search("risk factors").execute()
 
-    def in_(self, field: str, values: List[Any]) -> SelectQueryBuilder:
-        """Filter where field is in list (auto-starts SELECT)"""
-        return self.select().in_(field, values)
+            # Specify column when multiple FTS columns exist
+            db.table("notes").keyword_search("revenue", column="content").execute()
 
-    def not_in(self, field: str, values: List[Any]) -> SelectQueryBuilder:
-        """Filter where field is not in list (auto-starts SELECT)"""
-        return self.select().not_in(field, values)
+            # Control returned columns
+            db.table("filing_pages").keyword_search("merger", returning="id,filing_id").execute()
+        """
+        # Find all FTS-enabled columns
+        fields = self.table.get_fields()
+        fts_columns = [name for name, field in fields.items() if getattr(field, "fts", False)]
 
-    def contains(self, field: str, value: Any) -> SelectQueryBuilder:
-        """Filter where JSON array contains value (auto-starts SELECT)"""
-        return self.select().contains(field, value)
+        # Determine which column to search
+        if column:
+            # User specified a column - validate it's FTS-enabled
+            if column not in fts_columns:
+                if column in fields:
+                    raise ValueError(
+                        f"Column '{column}' on table '{self.table_name}' is not FTS-enabled. "
+                        f"FTS columns: {fts_columns}"
+                    )
+                else:
+                    raise ValueError(f"Column '{column}' does not exist on table '{self.table_name}'.")
+            search_column = column
+        else:
+            # Auto-detect FTS column
+            if not fts_columns:
+                raise ValueError(f"Table '{self.table_name}' has no FTS-enabled columns.")
+            elif len(fts_columns) > 1:
+                raise ValueError(
+                    f"Table '{self.table_name}' has multiple FTS-enabled columns: {fts_columns}. "
+                    f"Please specify which column to search using the 'column' parameter."
+                )
+            search_column = fts_columns[0]
 
-    def ilike(self, field: str, pattern: str) -> SelectQueryBuilder:
-        """Case-insensitive LIKE filter (auto-starts SELECT)"""
-        return self.select().ilike(field, pattern)
+        # Create SelectQueryBuilder with column selection
+        if returning:
+            builder = self.select(returning)
+        else:
+            builder = self.select()
 
-    def is_null(self, field: str) -> SelectQueryBuilder:
-        """Filter where field is NULL (auto-starts SELECT)"""
-        return self.select().is_null(field)
+        builder._search_applied = True
+        # Clear any pre-set ordering and disable future ordering
+        builder._order_by = None
+        builder._order_desc = False
+        def _no_order(*args, **kwargs):
+            raise ValueError("Ordering not supported for text search; results rank automatically.")
+        builder.order = _no_order  # instance-level override
+        builder.mongo_filters.setdefault(search_column, {}).update({"$keyword": query})
+        return builder
 
-    def is_not_null(self, field: str) -> SelectQueryBuilder:
-        """Filter where field is NOT NULL (auto-starts SELECT)"""
-        return self.select().is_not_null(field)
+    def regex_search(self, pattern: str, column: str, returning: Optional[str] = None) -> SelectQueryBuilder:
+        """Pattern search using REGEXP, GLOB, or LIKE fallback.
 
-    def keyword_search(self, field: str, text: str) -> SelectQueryBuilder:
-        """Full-text search using FTS5 with BM25 ranking (auto-starts SELECT)"""
-        return self.select().keyword_search(field, text)
+        Args:
+            pattern: Regular expression pattern
+            column: Column name to search
+            returning: Optional column selection (e.g., "id,content" or "*"). Defaults to "*"
 
-    def regex_search(self, field: str, pattern: str) -> SelectQueryBuilder:
-        """Pattern search using REGEXP/GLOB/LIKE (auto-starts SELECT)"""
-        return self.select().regex_search(field, pattern)
+        Returns:
+            SelectQueryBuilder for chaining
+
+        Raises:
+            ValueError: If column doesn't exist
+
+        Examples:
+            db.table("filing_pages").regex_search("risk.*factor", column="content").execute()
+            db.table("notes").regex_search("merger|acquisition", column="title", returning="id,title").execute()
+        """
+        # Allow regex on any TEXT column; no FTS requirement
+        if column not in self.table.get_fields():
+            raise ValueError(f"Column '{column}' does not exist on table '{self.table_name}'.")
+
+        # Create SelectQueryBuilder with column selection
+        if returning:
+            builder = self.select(returning)
+        else:
+            builder = self.select()
+
+        builder._search_applied = True
+        # Clear any pre-set ordering and disable future ordering
+        builder._order_by = None
+        builder._order_desc = False
+        def _no_order(*args, **kwargs):
+            raise ValueError("Ordering not supported for text search; results rank automatically.")
+        builder.order = _no_order  # instance-level override
+        builder.mongo_filters.setdefault(column, {}).update({"$regex": pattern})
+        return builder

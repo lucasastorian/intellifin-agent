@@ -38,7 +38,7 @@ class MongoToSqlConverter:
 
         # Store current table for error messages
         self._current_table = table
-        table_alias = table[0]
+        table_alias = "t"
 
         # Build columns
         main_columns = self._build_main_columns(projection, table_alias)
@@ -91,7 +91,7 @@ class MongoToSqlConverter:
         self._current_table = table
         self._fts_rank_exprs = []
         self._order_rank_forced = False
-        table_alias = table[0]
+        table_alias = "t"
 
         # Build columns
         if projection:
@@ -282,20 +282,20 @@ class MongoToSqlConverter:
 
                         pk = self._get_primary_key_field(tbl.__tablename__)
                         fts_table_name = f"{tbl.__tablename__}__{field}__fts"
-                        fts_table = f"`{fts_table_name}`"
-                        alias = table_alias or tbl.__tablename__[0]
+                        fts_table = f"`{fts_table_name}`"         # use quoting for FROM/WHERE
+                        main = table_alias or "t"
 
-                        # Filter via EXISTS
+                        # Filter via EXISTS — DO NOT alias in MATCH
                         clauses.append(
-                            f"EXISTS (SELECT 1 FROM {fts_table} f "
-                            f"WHERE f.rowid = {alias}.`{pk}` AND f MATCH ?)"
+                            f"EXISTS (SELECT 1 FROM {fts_table} "
+                            f"WHERE rowid = {main}.`{pk}` AND {fts_table} MATCH ?)"
                         )
                         params.append(match)
 
-                        # Stash bm25() expression for ORDER BY injection later
+                        # ORDER BY rank — bm25() must receive the bare table name (no quotes, no alias)
                         rank_expr = (
-                            f"(SELECT bm25(f) FROM {fts_table} f "
-                            f"WHERE f.rowid = {alias}.`{pk}` AND f MATCH ?)"
+                            f"(SELECT bm25({fts_table_name}) FROM {fts_table} "
+                            f"WHERE rowid = {main}.`{pk}` AND {fts_table} MATCH ?)"
                         )
                         self._fts_rank_exprs.append((field, rank_expr, match))
 

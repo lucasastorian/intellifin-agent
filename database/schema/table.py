@@ -246,7 +246,7 @@ class Table(metaclass=TableMeta):
                 f"  `{col}`,\n"
                 f"  content='{base}',\n"
                 f"  content_rowid='{pk_field}',\n"
-                f"  tokenize='unicode61 remove_diacritics 2 tokenchars \"-._%\"'\n"
+                f"  tokenize='unicode61'\n"
                 f");"
             )
 
@@ -281,6 +281,14 @@ class Table(metaclass=TableMeta):
         for field_name, value in data.items():
             if field_name in table_fields:
                 field_desc = table_fields[field_name]
+
+                # Reject attempts to manually set primary key fields
+                if field_desc.primary_key:
+                    raise ValueError(
+                        f"Cannot manually set primary key field '{field_name}' in table '{self.__tablename__}'. "
+                        f"Primary keys are auto-generated."
+                    )
+
                 field_desc.set_context(self.__tablename__, field_name, self._schema)
                 validated_data[field_name] = field_desc.validate(value)
             else:
@@ -302,6 +310,14 @@ class Table(metaclass=TableMeta):
         for field_name, value in data.items():
             if field_name in table_fields:
                 field_desc = table_fields[field_name]
+
+                # Reject attempts to update primary key fields
+                if field_desc.primary_key:
+                    raise ValueError(
+                        f"Cannot update primary key field '{field_name}' in table '{self.__tablename__}'. "
+                        f"Primary keys are immutable."
+                    )
+
                 field_desc.set_context(self.__tablename__, field_name, self._schema)
                 validated_data[field_name] = field_desc.validate(value)
             else:
@@ -313,6 +329,10 @@ class Table(metaclass=TableMeta):
     def _validate_required_fields(self, data: Dict[str, Any], table_fields: Dict[str, 'FieldDescriptor']) -> None:
         """Validate that all required fields are present (non-nullable without default)"""
         for field_name, field_desc in table_fields.items():
+            # Skip primary key fields - they're auto-generated (e.g., Serial with AUTOINCREMENT)
+            if field_desc.primary_key:
+                continue
+
             # Field must be provided if it's non-nullable and has no default
             must_provide = (not field_desc.nullable) and (field_desc.default is None)
             if must_provide and field_name not in data:

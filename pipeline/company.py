@@ -1,5 +1,5 @@
 from typing import List
-from edgar import Company as EdgarCompany
+from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
 
 from database.database import Database
@@ -14,14 +14,16 @@ from pipeline.filings.filing_twentyf import FilingTwentyF
 
 class Company:
 
-    start_year: int = 2015
-    end_year: int = 2026
     forms: List[str] = ["10-K", "10-Q", "8-K", "DEF 14A", "20-F", "6-K"]
 
-    def __init__(self, symbol: str, database: Database):
+    def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
+                 end_year: int = 2026):
         self.symbol = symbol
         self.database = database
+        self.start_year = start_year
+        self.end_year = end_year
 
+        set_identity(edgar_user_agent)
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
     def sync(self) -> bool:

@@ -53,9 +53,26 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL;")
         self.conn.execute("PRAGMA synchronous = NORMAL;")
 
+        # Auto-provision schema if database is empty
+        self._provision_schema_if_needed()
+
     def close(self):
         """Close the database connection"""
         self.conn.close()
+
+    def _provision_schema_if_needed(self):
+        """Automatically create tables if database is empty"""
+        # Check if any tables exist (excluding sqlite internal tables)
+        cursor = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        existing_tables = [row[0] for row in cursor.fetchall()]
+
+        # If database is empty, provision the schema
+        if not existing_tables:
+            create_sql = self.schema.generate_all_sql()
+            self.conn.executescript(create_sql)
+            self.conn.commit()
 
     @contextmanager
     def transaction(self):
@@ -148,6 +165,32 @@ class Database:
         except sqlite3.Error as e:
             self.conn.rollback()  # Roll back on any database error
             raise DatabaseError(str(e)) from e
+
+    def _count(self, *, table: str, find: Dict[str, Any]) -> int:
+        """Execute a COUNT query on specified table (internal use only).
+
+        Args:
+            table: Table name
+            find: Filter conditions (MongoDB-style)
+
+        Returns:
+            Integer count of matching rows
+        """
+        # Convert filters to WHERE clause
+        sql = self.converter.convert_select(table=table, find=find, projection={}, sort=[], limit=None)
+        params = self.converter.get_last_select_params()
+
+        # Replace SELECT ... with SELECT COUNT(*)
+        # The converter generates: SELECT ... FROM table WHERE ...
+        # We want: SELECT COUNT(*) FROM table WHERE ...
+        if sql.upper().startswith("SELECT "):
+            from_pos = sql.upper().find(" FROM ")
+            if from_pos != -1:
+                sql = "SELECT COUNT(*)" + sql[from_pos:]
+
+        cursor = self._exec(sql, params)
+        result = cursor.fetchone()
+        return result[0] if result else 0
 
     def _query(self, *, table: str, find: Dict[str, Any], projection: Optional[Dict[str, int]] = None,
                sort: Optional[list] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:

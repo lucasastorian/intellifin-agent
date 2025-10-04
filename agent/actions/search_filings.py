@@ -13,7 +13,7 @@ class SearchFilings(BaseModel):
     """List SEC filings that match basic filters (limited to 50 filings)
 
     - Use this first to identify filings before reading or searching text.
-    - Returns a markdown table with: id, company name, ticker symbol(s), exchange(s), form, items (for 8-K), press release (X),
+    - Returns a Markdown table with: id, company name, ticker symbol(s), exchange(s), form, items (for 8-K), press release (X),
         report_date, filing_date, fiscal_period, fiscal_year.
     - Results sorted by filing_date in descending order
     - For each form - will return both original submissions and amendments where applicable.
@@ -118,6 +118,14 @@ class SearchFilingsAction(BaseAction):
         if not filings:
             return Message(role="tool", status="completed", content="No filings in the requested range.")
 
+        content = self._format_filings_to_md(filings=filings, company_by_id=company_by_id)
+
+        return Message(
+            role="user",
+            status="completed",
+            content=content
+        )
+
     def validate(self, action: Action) -> SearchFilings:
         """Validates the action against the Pydantic schema"""
         try:
@@ -126,7 +134,8 @@ class SearchFilingsAction(BaseAction):
         except ValidationError:
             pass
 
-    def _format_filings_to_md(self, filings: List[dict], company_by_id: dict) -> str:
+    @staticmethod
+    def _format_filings_to_md(filings: List[dict], company_by_id: dict) -> str:
         """Formats the filings as a Markdown table"""
 
         def fmt_items(v):

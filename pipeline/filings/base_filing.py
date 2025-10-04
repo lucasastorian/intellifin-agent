@@ -61,7 +61,7 @@ class BaseFiling(ABC):
                                     "filename": note.html_file_name, "filing_id": filing_id,
                                     "company_id": self.company_id})
 
-        self.database.table("filing_notes").upsert(processed_notes, on_conflict="filename,filing_id").execute()
+        self.database.table("filing_notes").upsert(processed_notes, on_conflict="filing_id,filename").execute()
 
     def _upsert_financial_statements(self, xbrl: XBRL, filing_id: int):
         """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
