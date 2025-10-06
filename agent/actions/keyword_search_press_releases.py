@@ -68,7 +68,7 @@ class KeywordSearchPressReleasesAction(BaseAction):
             )
 
         # Get company_id
-        company = (
+        company_result = (
             self.database
             .table("companies")
             .select("id,name,symbols")
@@ -77,7 +77,7 @@ class KeywordSearchPressReleasesAction(BaseAction):
             .execute()
         )
 
-        if not company:
+        if not company_result.data:
             self.log_error(f"Company not found for {args.symbol}")
             return Message(
                 role="tool",
@@ -87,11 +87,11 @@ class KeywordSearchPressReleasesAction(BaseAction):
                 action_id=action.id
             )
 
-        company_id = company[0]['id']
-        company_record = company[0]
+        company_id = company_result.data[0]['id']
+        company_record = company_result.data[0]
 
         # Get 8-K filings with press releases in date range
-        filings = (
+        filings_result = (
             self.database
             .table("filings")
             .select("id,company_id,form,filing_date")
@@ -103,7 +103,7 @@ class KeywordSearchPressReleasesAction(BaseAction):
             .execute()
         )
 
-        if not filings:
+        if not filings_result.data:
             self.log_done("No press releases in date range")
             return Message(
                 role="tool",
@@ -112,12 +112,12 @@ class KeywordSearchPressReleasesAction(BaseAction):
                 action_id=action.id
             )
 
-        filing_ids = [f['id'] for f in filings]
-        filing_by_id = {f['id']: f for f in filings}
+        filing_ids = [f['id'] for f in filings_result.data]
+        filing_by_id = {f['id']: f for f in filings_result.data}
 
         # Keyword search on press release pages
         try:
-            results = (
+            results_result = (
                 self.database
                 .table("press_release_pages")
                 .keyword_search(args.query, returning="id,filing_id,page,content")
@@ -129,15 +129,15 @@ class KeywordSearchPressReleasesAction(BaseAction):
             self.log_error(f"Search failed: {e}")
             return Message(role="tool", status="completed", content=f"Search error: {e}", error=True, action_id=action.id)
 
-        if not results:
+        if not results_result.data:
             self.log_done("No matches found")
             return Message(role="tool", status="completed", content="No matching press releases found.", action_id=action.id)
 
         company_by_id = {company_id: company_record}
-        content = self._format_results(results, filing_by_id, company_by_id)
+        content = self._format_results(results_result.data, filing_by_id, company_by_id)
 
-        unique_filings = len({r['filing_id'] for r in results})
-        summary = f"Found {len(results)} matching page(s) across {unique_filings} press release(s)"
+        unique_filings = len({r['filing_id'] for r in results_result.data})
+        summary = f"Found {len(results_result.data)} matching page(s) across {unique_filings} press release(s)"
 
         self.log_done(summary)
 

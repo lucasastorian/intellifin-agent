@@ -35,7 +35,7 @@ class SearchCompaniesAction(BaseAction):
 
         # Get all companies and filter in Python (simple approach)
         # TODO: Add LIKE/ILIKE support to query builder for more efficient filtering
-        all_companies = (
+        result = (
             self.database
             .table("companies")
             .select("id,name,symbols,exchanges,industry,sector,market_cap")
@@ -45,7 +45,7 @@ class SearchCompaniesAction(BaseAction):
         # Case-insensitive partial match
         query_lower = args.query.lower()
         matches = [
-            c for c in all_companies
+            c for c in result.data
             if query_lower in c['name'].lower()
         ]
 

@@ -89,16 +89,21 @@ class Database:
             raise
 
     def table(self, name: str) -> "TableQueryBuilder":
-        """Return a query builder bound to a table (Supabase-style).
+        """Return a query builder bound to a table or view.
 
         Args:
-            name: Table name
+            name: Table or view name
 
         Returns:
             TableQueryBuilder instance for chaining operations
         """
         from .query_builder.core.table_query_builder import TableQueryBuilder
-        self.schema.get_table(name)
+
+        if name in self.schema.views:
+            pass
+        else:
+            self.schema.get_table(name)
+
         return TableQueryBuilder(self, self.schema, name)
 
     def _now_iso(self) -> str:
@@ -199,20 +204,25 @@ class Database:
         rows = [dict(row) for row in cursor.fetchall()]
 
         processed = []
+        is_view = table in self.schema.views
         for row in rows:
             row = self._deserialize_json_fields(table, row)
             # Pad missing fields (projection) with None
-            if projection:
-                for fld in projection.keys():
-                    row.setdefault(fld, None)
-            else:
-                for fld in self.schema.get_table(table).get_fields().keys():
-                    row.setdefault(fld, None)
+            if not is_view:
+                if projection:
+                    for fld in projection.keys():
+                        row.setdefault(fld, None)
+                else:
+                    for fld in self.schema.get_table(table).get_fields().keys():
+                        row.setdefault(fld, None)
             processed.append(row)
         return processed
 
     def _insert(self, table: str, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Union[int, List[int]]:
         """Execute insert operation with validation (internal use only)"""
+        if table in self.schema.views:
+            raise ValueError(f"Writes are not allowed on view '{table}'.")
+
         # Validate data against schema
         validated_data = self._validate_insert_data(table, data)
 
@@ -253,6 +263,9 @@ class Database:
 
     def _update(self, table: str, data: Dict[str, Any], filters: Dict[str, Any]) -> int:
         """Execute update operation with validation (internal use only)"""
+        if table in self.schema.views:
+            raise ValueError(f"Writes are not allowed on view '{table}'.")
+
         if not data:
             raise ValueError("Update data cannot be empty")
 
@@ -278,6 +291,9 @@ class Database:
 
     def _delete(self, table: str, filters: Dict[str, Any]) -> int:
         """Execute delete operation and return number of affected rows (internal use only)"""
+        if table in self.schema.views:
+            raise ValueError(f"Writes are not allowed on view '{table}'.")
+
         mongo_obj = {
             "collection": table,
             "delete": True,
@@ -324,6 +340,9 @@ class Database:
             or PRIMARY KEY, not constraint names like Postgres. Ensure your schema defines
             the appropriate UNIQUE constraint for the columns specified.
         """
+        if table in self.schema.views:
+            raise ValueError(f"Writes are not allowed on view '{table}'.")
+
         if isinstance(values, dict):
             rows = [values]
         else:
@@ -520,7 +539,25 @@ class Database:
 
     def _serialize_json_fields(self, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Serialize JSON fields to strings for SQLite storage"""
-        # Get table schema
+        from .schema.fields import JSONField
+
+        # Handle views by resolving underlying types
+        if table in self.schema.views:
+            vcls = self.schema.views[table]
+            vcls._schema = self.schema
+            tmap = vcls.type_map(self.schema)
+            out = data.copy()
+            for alias, val in list(out.items()):
+                fd = tmap.get(alias)
+                if fd is not None and isinstance(fd, JSONField):
+                    if val is not None and not isinstance(val, str):
+                        try:
+                            out[alias] = json.dumps(val)
+                        except Exception:
+                            out[alias] = str(val)
+            return out
+
+        # Handle base tables (existing behavior)
         table_obj = self.schema.get_table(table)
         if not table_obj:
             return data
@@ -531,7 +568,6 @@ class Database:
         for field_name, field_descriptor in fields.items():
             if field_name in data and field_descriptor.sql_type == 'TEXT':
                 # Check if this is a JSONField by checking the class type
-                from .schema.fields import JSONField
                 if isinstance(field_descriptor, JSONField):
                     value = data[field_name]
                     if value is not None and not isinstance(value, str):
@@ -544,7 +580,25 @@ class Database:
 
     def _deserialize_json_fields(self, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Deserialize JSON fields from strings back to Python objects"""
-        # Get table schema
+        from .schema.fields import JSONField
+
+        # Handle views by resolving underlying types
+        if table in self.schema.views:
+            vcls = self.schema.views[table]
+            vcls._schema = self.schema
+            tmap = vcls.type_map(self.schema)
+            out = data.copy()
+            for alias, fd in tmap.items():
+                if alias in out and isinstance(fd, JSONField):
+                    v = out[alias]
+                    if v is not None and isinstance(v, str):
+                        try:
+                            out[alias] = json.loads(v)
+                        except Exception:
+                            pass
+            return out
+
+        # Handle base tables (existing behavior)
         table_obj = self.schema.get_table(table)
         if not table_obj:
             return data
@@ -555,7 +609,6 @@ class Database:
         for field_name, field_descriptor in fields.items():
             if field_name in data and field_descriptor.sql_type == 'TEXT':
                 # Check if this is a JSONField
-                from .schema.fields import JSONField
                 if isinstance(field_descriptor, JSONField):
                     value = data[field_name]
                     if value is not None and isinstance(value, str):

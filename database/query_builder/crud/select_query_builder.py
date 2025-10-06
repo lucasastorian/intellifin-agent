@@ -1,6 +1,7 @@
 
 from typing import List, Dict, Any
 
+from ...results import DBResult
 from ..core.base import BaseQueryBuilder
 from ..mixins.filter_mixin import FilterMixin
 from ..mixins.order_limit_mixin import OrderLimitMixin
@@ -8,32 +9,39 @@ from ..mixins.selection_mixin import SelectionMixin
 
 
 class SelectQueryBuilder(BaseQueryBuilder, FilterMixin, OrderLimitMixin, SelectionMixin):
-    """Builder specifically for SELECT queries"""
-
     def __init__(self, database, schema, table: str):
         super().__init__(database, schema, table)
         self._search_applied = False
-        self._count_mode = False
 
+    def count(self) -> DBResult[int]:
+        n = self.database._count(
+            table=self.table.__tablename__,
+            find=self.mongo_filters
+        )
+        return DBResult[int](data=n, score=None)
 
-    def count(self) -> "SelectQueryBuilder":
-        """Return count of matching rows instead of the rows themselves.
+    def single(self) -> DBResult[dict]:
+        projection = self._build_projection()
+        sort_list = []
+        if self._order_by is not None:
+            sort_list = [(self._order_by, -1 if self._order_desc else 1)]
 
-        Returns:
-            Self for chaining (call execute() to get the count)
-        """
-        self._count_mode = True
-        return self
+        rows = self.database._query(
+            table=self.table.__tablename__,
+            find=self.mongo_filters,
+            projection=projection,
+            sort=sort_list,
+            limit=1
+        )
 
-    def execute(self, *args, **kwargs):
-        """Execute SELECT query
+        if not rows:
+            raise LookupError(f"No rows found in table '{self.table.__tablename__}' matching the query")
 
-        Returns:
-            List[Dict[str, Any]] if not in count mode, otherwise int (count)
+        row = rows[0]
+        score = float(row.pop("_score")) if "_score" in row else None
+        return DBResult[dict](data=row, score=score)
 
-        Raises:
-            TypeError: If any arguments are passed
-        """
+    def execute(self, *args, **kwargs) -> DBResult[List[dict]]:
         if args or kwargs:
             raise TypeError(
                 "execute() takes no arguments. "
@@ -42,20 +50,12 @@ class SelectQueryBuilder(BaseQueryBuilder, FilterMixin, OrderLimitMixin, Selecti
                 ".keyword_search('query', returning='id,content').execute()"
             )
 
-        if self._count_mode:
-            # Count mode: return integer count
-            return self.database._count(
-                table=self.table.__tablename__,
-                find=self.mongo_filters
-            )
-
-        # Normal mode: return rows
         projection = self._build_projection()
         sort_list = []
         if self._order_by is not None:
             sort_list = [(self._order_by, -1 if self._order_desc else 1)]
 
-        return self.database._query(
+        rows = self.database._query(
             table=self.table.__tablename__,
             find=self.mongo_filters,
             projection=projection,
@@ -63,19 +63,8 @@ class SelectQueryBuilder(BaseQueryBuilder, FilterMixin, OrderLimitMixin, Selecti
             limit=self._limit
         )
 
-    def single(self) -> Dict[str, Any]:
-        """Execute query and return a single row.
+        scores = None
+        if rows and "_score" in rows[0]:
+            scores = [float(r.pop("_score")) for r in rows]
 
-        Automatically applies LIMIT 1 and returns the first row.
-        Raises LookupError if no rows are found.
-
-        Returns:
-            Single row as dictionary
-
-        Raises:
-            LookupError: If no rows match the query
-        """
-        rows = self.limit(1).execute()
-        if not rows:
-            raise LookupError(f"No rows found in table '{self.table.__tablename__}' matching the query")
-        return rows[0]
+        return DBResult[List[dict]](data=rows, score=scores)

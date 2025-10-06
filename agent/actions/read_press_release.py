@@ -32,7 +32,7 @@ class ReadPressReleaseAction(BaseAction):
         self.log_start("ReadPressRelease", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}")
 
         # Get filing metadata
-        filing = (
+        filing_result = (
             self.database
             .table("filings")
             .select("id,company_id,form,filing_date,report_date,press_release")
@@ -41,12 +41,12 @@ class ReadPressReleaseAction(BaseAction):
             .execute()
         )
 
-        if not filing:
+        if not filing_result.data:
             self.log_error(f"Filing #{args.filing_id} not found")
             return Message(role="tool", status="completed",
                          content=f"Filing id {args.filing_id} not found.", error=True, action_id=action.id)
 
-        filing = filing[0]
+        filing = filing_result.data[0]
 
         if not filing.get('press_release'):
             self.log_error("Filing does not have a press release")
@@ -55,7 +55,7 @@ class ReadPressReleaseAction(BaseAction):
                          error=True, action_id=action.id)
 
         # Get company info
-        company = (
+        company_result = (
             self.database
             .table("companies")
             .select("id,name,symbols,exchanges")
@@ -63,10 +63,10 @@ class ReadPressReleaseAction(BaseAction):
             .limit(1)
             .execute()
         )
-        company = company[0] if company else {"name": "Unknown", "symbols": [], "exchanges": []}
+        company = company_result.data[0] if company_result.data else {"name": "Unknown", "symbols": [], "exchanges": []}
 
         # Get press release pages
-        max_row = (
+        max_row_result = (
             self.database
             .table("press_release_pages")
             .select("page")
@@ -76,13 +76,13 @@ class ReadPressReleaseAction(BaseAction):
             .execute()
         )
 
-        if not max_row:
+        if not max_row_result.data:
             self.log_error(f"No press release pages for filing #{args.filing_id}")
             return Message(role="tool", status="completed",
                          content=f"No press release pages stored for filing {args.filing_id}.",
                          error=True, action_id=action.id)
 
-        max_page = max_row[0]["page"]
+        max_page = max_row_result.data[0]["page"]
 
         start = args.start_page
         end = min(args.end_page, max_page, args.start_page + self.max_pages - 1)
@@ -93,7 +93,7 @@ class ReadPressReleaseAction(BaseAction):
                          content=f"Start page {start} exceeds last page {max_page}.",
                          error=True, action_id=action.id)
 
-        pages = (
+        pages_result = (
             self.database
             .table("press_release_pages")
             .select("page,content")
@@ -104,14 +104,14 @@ class ReadPressReleaseAction(BaseAction):
             .execute()
         )
 
-        if not pages:
+        if not pages_result.data:
             self.log_error(f"No pages in range {start}–{end}")
             return Message(role="tool", status="completed",
                          content=f"No pages found in range {start}-{end}.",
                          error=True, action_id=action.id)
 
         header = self._format_header(company, filing, start, end, max_page)
-        body = self._join_pages_to_md(pages)
+        body = self._join_pages_to_md(pages_result.data)
 
         output = header + "\n\n" + body
         truncated = False
@@ -121,7 +121,7 @@ class ReadPressReleaseAction(BaseAction):
 
         company_name = company.get('name', 'Unknown')
         form = filing.get('form', '?')
-        summary = f"Retrieved {len(pages)} pages: {company_name} {form} press release"
+        summary = f"Retrieved {len(pages_result.data)} pages: {company_name} {form} press release"
         if truncated:
             summary += " (truncated)"
 

@@ -1,10 +1,9 @@
 from typing import Any, Dict, List, Union, Optional
+from ...results import DBResult
 from ..core.base import BaseQueryBuilder
 
 
 class UpsertQueryBuilder(BaseQueryBuilder):
-    """Builder for UPSERT queries (INSERT ... ON CONFLICT ...)"""
-
     def __init__(
         self, database, schema, table: str,
         values: Union[Dict[str, Any], List[Dict[str, Any]]],
@@ -23,8 +22,7 @@ class UpsertQueryBuilder(BaseQueryBuilder):
         self.default_to_null = default_to_null
 
     def execute(self):
-        """Execute UPSERT query"""
-        return self.database._upsert(
+        out = self.database._upsert(
             table=self.table.__tablename__,
             values=self.values,
             on_conflict=self.on_conflict,
@@ -33,3 +31,4 @@ class UpsertQueryBuilder(BaseQueryBuilder):
             count=self.count,
             default_to_null=self.default_to_null,
         )
+        return DBResult[List[dict]](data=out.get("data") or [])

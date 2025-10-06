@@ -1,5 +1,6 @@
 from database.schema import Schema, Table
 from database.schema.fields import Serial, Text, Integer, Boolean, JSONField, Date, Timestamp, Enum, Float
+from database.schema.view import View, Field
 
 
 class Companies(Table):
@@ -39,6 +40,32 @@ class Filings(Table):
 
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+
+class CompanyFilings(View):
+    __viewname__ = "company_filings"
+    __tables__ = (Filings, Companies)
+
+    id = Field(table="filings", field="id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filings", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+    created_at = Field(table="filings", field="created_at")
+    updated_at = Field(table="filings", field="updated_at")
 
 
 class FinancialStatements(Table):
@@ -117,3 +144,5 @@ schema.add_table(FinancialStatements)
 schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
 schema.add_table(PressReleasePages)
+
+schema.add_view(CompanyFilings)

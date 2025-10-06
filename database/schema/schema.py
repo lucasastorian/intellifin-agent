@@ -13,9 +13,9 @@ class Schema:
     """Central schema manager for tables - core table management only."""
 
     def __init__(self):
-        self.tables: Dict[str, Type[Table]] = {}  # table_name -> Table class
-        
-        # SQLite reserved words to prevent as table names
+        self.tables: Dict[str, Type[Table]] = {}
+        self.views: Dict[str, Type[Table]] = {}
+
         self._reserved_words = {
             'abort', 'action', 'add', 'after', 'all', 'alter', 'analyze', 'and', 'as', 'asc',
             'attach', 'autoincrement', 'before', 'begin', 'between', 'by', 'cascade', 'case',
@@ -35,8 +35,7 @@ class Schema:
         }
 
     def add_table(self, table: Union[Type[Table], 'TableBuilder']) -> None:
-        # Handle TableBuilder instances
-        if hasattr(table, 'build'):  # Duck typing to avoid circular import
+        if hasattr(table, 'build'):
             from .builder import TableBuilder
             if isinstance(table, TableBuilder):
                 table_cls = table.build()
@@ -48,12 +47,19 @@ class Schema:
         if table_cls.__tablename__ in self.tables:
             raise ValueError(f"Table '{table_cls.__tablename__}' already added.")
 
-        # Validate table name is not a reserved word
         if self._is_reserved_word(table_cls.__tablename__):
             raise ValueError(f"Table name '{table_cls.__tablename__}' is a SQLite reserved word. "
                            f"Please choose a different name.")
 
         self.tables[table_cls.__tablename__] = table_cls
+
+    def add_view(self, view: Type[Table]) -> None:
+        view_name = view.__viewname__
+        if view_name in self.views:
+            raise ValueError(f"View '{view_name}' already added.")
+        if self._is_reserved_word(view_name):
+            raise ValueError(f"View name '{view_name}' is a SQLite reserved word.")
+        self.views[view_name] = view
 
     def _is_reserved_word(self, name: str) -> bool:
         """Check if a name is a SQLite reserved word"""
@@ -97,6 +103,11 @@ class Schema:
             sql = table_cls.generate_create_sql()
             all_sql.append(sql)
 
+        for view_cls in self.views.values():
+            view_cls._schema = self
+            sql = view_cls.generate_create_sql()
+            all_sql.append(sql)
+
         return "\n".join(all_sql)
 
     def table(self, name: str, collection=None) -> Type[Table]:
@@ -106,6 +117,15 @@ class Schema:
         table_instance._schema = self
         table_instance._collection = collection
         return table_instance
+
+    def view(self, name: str) -> Type[Table]:
+        """Get view class for operations"""
+        if name not in self.views:
+            raise ValueError(f"View '{name}' not found in schema.")
+        view_cls = self.views[name]
+        view_instance = view_cls()
+        view_instance._schema = self
+        return view_instance
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize entire schema to dictionary"""

@@ -98,36 +98,16 @@ class SearchFilingsAction(BaseAction):
                 action_id=action.id
             )
 
-        # Debug: Check what's in the companies table
-        all_companies = self.database.table("companies").select("*").execute()
-        print(f"  [DEBUG] Total companies in DB: {len(all_companies)}", flush=True)
-        if all_companies:
-            print(f"  [DEBUG] First company: {all_companies[0]}", flush=True)
-
-        companies_rows = (
-            self.database
-            .table("companies")
-            .select("id,name,symbols,exchanges")
-            .contains("symbols", args.symbols)
-            .execute()
-        )
-        print(f"  [DEBUG] Companies found for symbols {args.symbols}: {len(companies_rows)}", flush=True)
-
-        company_ids = [r["id"] for r in companies_rows]
-        company_by_id = {r["id"]: r for r in companies_rows}
-
         forms = self._expand_forms_with_amendments(args.forms)
 
-        print(f"  [DEBUG] company_ids: {company_ids}", flush=True)
-        print(f"  [DEBUG] forms: {forms}", flush=True)
-        print(f"  [DEBUG] filing_date range: {args.start_date} → {args.end_date or date.today().isoformat()}", flush=True)
-
+        # Query the company_filings view directly
         qb = (
             self.database
-            .table("filings")
+            .table("company_filings")
             .select(
-                "id,company_id,form,items,press_release,fiscal_year,fiscal_period,filing_date,report_date,accession_number")
-            .in_("company_id", company_ids)
+                "id,company_id,company_name,company_symbols,company_exchanges,form,items,press_release,"
+                "fiscal_year,fiscal_period,filing_date,report_date,accession_number")
+            .contains("company_symbols", args.symbols)
             .in_("form", forms)
             .gte("filing_date", args.start_date)
             .lte("filing_date", args.end_date or date.today().isoformat())
@@ -137,19 +117,19 @@ class SearchFilingsAction(BaseAction):
             for item_code in args.include_items:
                 qb = qb.contains("items", item_code)
 
-        filings = qb.order("filing_date", desc=True).limit(50).execute()
-        print(f"  [DEBUG] Found {len(filings)} filings", flush=True)
-        if not filings:
+        filings_result = qb.order("filing_date", desc=True).limit(50).execute()
+
+        if not filings_result.data:
             self.log_done("No filings found")
             return Message(role="tool", status="completed", content="No filings in the requested range.",
                            action_id=action.id)
 
-        content = self._format_filings_to_md(filings=filings, company_by_id=company_by_id)
+        content = self._format_filings_to_md(filings=filings_result.data)
 
         # Build result summary
-        companies = {company_by_id[f['company_id']]['name'] for f in filings if f.get('company_id') in company_by_id}
-        forms = {f['form'] for f in filings}
-        summary = f"Found {len(filings)} filings: {', '.join(sorted(forms))}"
+        companies = {f['company_name'] for f in filings_result.data if f.get('company_name')}
+        forms = {f['form'] for f in filings_result.data}
+        summary = f"Found {len(filings_result.data)} filings: {', '.join(sorted(forms))}"
         if len(companies) <= 3:
             summary += f" ({', '.join(sorted(companies))})"
 
@@ -171,7 +151,7 @@ class SearchFilingsAction(BaseAction):
             pass
 
     @staticmethod
-    def _format_filings_to_md(filings: List[dict], company_by_id: dict) -> str:
+    def _format_filings_to_md(filings: List[dict]) -> str:
         """Formats the filings as a Markdown table"""
 
         def fmt_items(v):
@@ -179,12 +159,11 @@ class SearchFilingsAction(BaseAction):
 
         rows = []
         for f in filings:
-            c = company_by_id.get(f.get("company_id") or -1, {})
             rows.append({
                 "id": f['id'],
-                "company": c['name'],
-                "symbols": fmt_items(c['symbols']),
-                "exchanges": fmt_items(c['exchanges']),
+                "company": f.get('company_name', ''),
+                "symbols": fmt_items(f.get('company_symbols', [])),
+                "exchanges": fmt_items(f.get('company_exchanges', [])),
                 "form": f['form'],
                 "items": f['items'],
                 "press_release": "X" if f['press_release'] else "",

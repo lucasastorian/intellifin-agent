@@ -9,13 +9,14 @@ from ..crud.upsert_query_builder import UpsertQueryBuilder
 
 
 class TableQueryBuilder:
-    """Entry point for all query operations on a table"""
+    """Entry point for all query operations on a table or view"""
 
     def __init__(self, database, schema, table: str):
         self.database = database
         self.schema = schema
         self.table_name = table
-        self.table = schema.table(table)
+        self.is_view = table in schema.views
+        self.table = schema.view(table) if self.is_view else schema.table(table)
 
     def select(self, fields: str = '*') -> SelectQueryBuilder:
         """Start a SELECT query"""
@@ -26,18 +27,24 @@ class TableQueryBuilder:
 
     def insert(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> InsertQueryBuilder:
         """Start an INSERT query"""
+        if self.is_view:
+            raise ValueError(f"Cannot INSERT into view '{self.table_name}'.")
         return InsertQueryBuilder(
             self.database, self.schema, self.table_name, data=data
         )
 
     def update(self, data: Dict[str, Any]) -> UpdateQueryBuilder:
         """Start an UPDATE query"""
+        if self.is_view:
+            raise ValueError(f"Cannot UPDATE view '{self.table_name}'.")
         return UpdateQueryBuilder(
             self.database, self.schema, self.table_name, data
         )
 
     def delete(self) -> DeleteQueryBuilder:
         """Start a DELETE query"""
+        if self.is_view:
+            raise ValueError(f"Cannot DELETE from view '{self.table_name}'.")
         return DeleteQueryBuilder(
             self.database, self.schema, self.table_name
         )
@@ -61,6 +68,8 @@ class TableQueryBuilder:
             count: "exact" to get affected row count
             default_to_null: For bulk, missing fields -> NULL vs DEFAULT
         """
+        if self.is_view:
+            raise ValueError(f"Cannot UPSERT into view '{self.table_name}'.")
         return UpsertQueryBuilder(
             self.database, self.schema, self.table_name,
             values=values,
@@ -99,9 +108,15 @@ class TableQueryBuilder:
             # Control returned columns
             db.table("filing_pages").keyword_search("merger", returning="id,filing_id").execute()
         """
-        # Find all FTS-enabled columns
-        fields = self.table.get_fields()
-        fts_columns = [name for name, field in fields.items() if getattr(field, "fts", False)]
+        # For views, resolve to underlying FTS-enabled fields
+        if self.is_view:
+            self.table._schema = self.schema
+            type_map = self.table.type_map(self.schema)
+            fts_columns = [alias for alias, fd in type_map.items() if getattr(fd, "fts", False)]
+        else:
+            # Find all FTS-enabled columns
+            fields = self.table.get_fields()
+            fts_columns = [name for name, field in fields.items() if getattr(field, "fts", False)]
 
         # Determine which column to search
         if column:
@@ -161,8 +176,9 @@ class TableQueryBuilder:
             db.table("notes").regex_search("merger|acquisition", column="title", returning="id,title").execute()
         """
         # Allow regex on any TEXT column; no FTS requirement
+        # Works on both tables and views
         if column not in self.table.get_fields():
-            raise ValueError(f"Column '{column}' does not exist on table '{self.table_name}'.")
+            raise ValueError(f"Column '{column}' does not exist on {'view' if self.is_view else 'table'} '{self.table_name}'.")
 
         # Create SelectQueryBuilder with column selection
         if returning:
