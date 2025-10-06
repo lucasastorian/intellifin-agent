@@ -6,19 +6,18 @@ from agent.system_prompts.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions.search_filings import SearchFilingsAction
-from agent.actions.read_filing import ReadFilingAction
+from agent.actions import SearchFilingsAction, ReadFilingAction, KeywordSearchFilingPagesAction
 
 
 class Agent:
 
-    start_year: int = 2023
-    max_iter: int = 5
+    start_year: int = 2018
 
-    def __init__(self, edgar_user_agent: str):
+    def __init__(self, edgar_user_agent: str, model: str = "gpt-4o-mini", temperature: float = 1.0, max_iter: int = 5):
         self.edgar_user_agent = edgar_user_agent
-        self.client = OpenAIClient()
+        self.client = OpenAIClient(model=model, temperature=temperature)
         self.num_iter = 0
+        self.max_iter = max_iter
         self.messages = []
 
         self.database = Database(schema=schema, base_path="./data/.local.db")
@@ -31,7 +30,9 @@ class Agent:
         actions = [SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
                                        start_year=self.start_year),
                    ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
-                                    start_year=self.start_year)]
+                                    start_year=self.start_year),
+                   KeywordSearchFilingPagesAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
+                                                  start_year=self.start_year)]
 
         while self.num_iter < self.max_iter:
             terminate = await self.step(actions=actions)
