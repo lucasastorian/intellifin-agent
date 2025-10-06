@@ -1,5 +1,7 @@
-import sqlite3
+import re
 import json
+import sqlite3
+from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Union, List, Dict, Any, Optional
@@ -19,10 +21,12 @@ class Database:
         self.schema = schema
         self.base_path = base_path
         self.converter = MongoToSqlConverter(schema)
+
+        Path(base_path).parent.mkdir(parents=True, exist_ok=True)
+
         self.conn = sqlite3.connect(self.base_path)
         self.conn.row_factory = sqlite3.Row
 
-        # Check SQLite version (require ≥3.35 for RETURNING support)
         version_str = self.conn.execute('SELECT sqlite_version()').fetchone()[0]
         version_tuple = tuple(int(x) for x in version_str.split('.'))
         if version_tuple < (3, 35, 0):
@@ -31,16 +35,14 @@ class Database:
                 f"This database requires SQLite ≥3.35.0 for RETURNING clause support."
             )
 
-        # Check JSON1 extension is available
         try:
             self.conn.execute("SELECT json_valid('[]')").fetchone()
+
         except sqlite3.OperationalError as e:
             raise RuntimeError(
                 "SQLite was built without JSON1; required for JSON array contains filters."
             ) from e
 
-        # Register REGEXP function for regex_search (case-insensitive by default)
-        import re
         def _sqlite_regexp(pattern, text):
             try:
                 return 1 if re.search(pattern, text or "", re.IGNORECASE) else 0
@@ -48,12 +50,10 @@ class Database:
                 return 0
         self.conn.create_function("REGEXP", 2, _sqlite_regexp)
 
-        # Enable FK constraints and performance/reliability settings
         self.conn.execute("PRAGMA foreign_keys = ON;")
         self.conn.execute("PRAGMA journal_mode = WAL;")
         self.conn.execute("PRAGMA synchronous = NORMAL;")
 
-        # Auto-provision schema if database is empty
         self._provision_schema_if_needed()
 
     def close(self):
@@ -62,13 +62,11 @@ class Database:
 
     def _provision_schema_if_needed(self):
         """Automatically create tables if database is empty"""
-        # Check if any tables exist (excluding sqlite internal tables)
         cursor = self.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
         existing_tables = [row[0] for row in cursor.fetchall()]
 
-        # If database is empty, provision the schema
         if not existing_tables:
             create_sql = self.schema.generate_all_sql()
             self.conn.executescript(create_sql)
@@ -100,24 +98,8 @@ class Database:
             TableQueryBuilder instance for chaining operations
         """
         from .query_builder.core.table_query_builder import TableQueryBuilder
-        # Validate table exists
         self.schema.get_table(name)
         return TableQueryBuilder(self, self.schema, name)
-
-    def rebuild_fts(self, table: str, column: str):
-        """Rebuild FTS index for a specific column.
-
-        Args:
-            table: Table name
-            column: Column name with fts=True
-
-        Note:
-            Currently a stub for future implementation. FTS tables are created
-            via schema migrations and maintained automatically via triggers.
-        """
-        # TODO: Implement manual FTS rebuild
-        # Could be used to rebuild after adding fts=True to existing populated table
-        pass
 
     def _now_iso(self) -> str:
         """Return current UTC timestamp in ISO 8601 format"""

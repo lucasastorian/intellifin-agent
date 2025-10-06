@@ -1,5 +1,5 @@
 from database.schema import Schema, Table
-from database.schema.fields import Serial, Text, Integer, Boolean, JSONField, Date, Timestamp, Enum
+from database.schema.fields import Serial, Text, Integer, Boolean, JSONField, Date, Timestamp, Enum, Float
 
 
 class Companies(Table):
@@ -11,8 +11,11 @@ class Companies(Table):
     exchanges = JSONField(nullable=True, index=True)
     cik = Text(nullable=False, unique=True, index=True)
     sic = Text(nullable=False, index=True)
+    sector = Text(nullable=True)
     industry = Text(nullable=True)
+    market_cap = Float(nullable=True)
     fiscal_year_end = Text(nullable=True)
+    synced = Boolean(default=False)
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 

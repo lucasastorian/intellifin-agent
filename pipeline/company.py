@@ -13,7 +13,6 @@ from pipeline.filings.filing_twentyf import FilingTwentyF
 
 
 class Company:
-
     forms: List[str] = ["10-K", "10-Q", "8-K", "DEF 14A", "20-F", "6-K"]
 
     def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
@@ -37,16 +36,24 @@ class Company:
         return self.upsert()
 
     def upsert(self) -> bool:
-        """Upserts a company into the companies table"""
+        """Syncs filings for a company (assumes company already provisioned)"""
 
-        company_id = self._upsert_company()
+        company_id = self._get_company_id()
         self._upsert_filings(company_id=company_id)
+
+        self.on_sync_complete(company_id=company_id)
 
         return True
 
     def exists(self) -> bool:
-        """Returns True if the company exists in the DB"""
-        return len(self.database.table("companies").select("*").contains("symbols", self.symbol).limit(1).execute()) > 0
+        """Returns True if the company exists in the DB and has been synced"""
+        return len(
+            self.database.table("companies").select("*").contains("symbols", self.symbol).eq("synced", True).limit(
+                1).execute()) > 0
+
+    def on_sync_complete(self, company_id: int):
+        """Updates the copmany's synced status to true on complete"""
+        self.database.table("companies").update({"synced": True}).eq("id", company_id).execute()
 
     def _upsert_filings(self, company_id: int):
         """Upserts ALL the filings for that company within a given date range"""
@@ -57,20 +64,14 @@ class Company:
             parser = self._get_filing_parser(filing=filing, company_id=company_id)
             parser.upsert()
 
-    def _upsert_company(self) -> int:
-        """Upserts the company object and returns the company serial id"""
-        response = self.database.table("companies").upsert({
-            "name": self.company.name,
-            "symbols": self.company.tickers,
-            "exchanges": [exchange.upper() for exchange in self.company.get_exchanges() if
-                          self.company.get_exchanges()],
-            "cik": self.company.cik,
-            "sic": self.company.sic,
-            "industry": self.company.industry,
-            "fiscal_year_end": self.company.fiscal_year_end
-        }, on_conflict="cik").execute()
+    def _get_company_id(self) -> int:
+        """Gets the company id (assumes company already provisioned)"""
+        response = self.database.table("companies").select("id").eq("cik", self.company.cik).limit(1).execute()
 
-        return response['data'][0]['id']
+        if not response:
+            raise ValueError(f"Company with CIK {self.company.cik} not found. Ensure companies are provisioned.")
+
+        return response[0]['id']
 
     def _load_filings(self) -> EntityFilings:
         """Loads all filings from Edgar"""

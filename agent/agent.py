@@ -2,11 +2,13 @@ from typing import List, Optional
 
 from schema import schema
 from database import Database
+from pipeline.company_provisioner import CompanyProvisioner
 from agent.system_prompts.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions import SearchFilingsAction, ReadFilingAction, KeywordSearchFilingPagesAction
+from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, KeywordSearchFilingPagesAction,
+                           KeywordSearchFilingNotesAction, KeywordSearchPressReleasesAction, ReadPressReleaseAction)
 
 
 class Agent:
@@ -22,17 +24,24 @@ class Agent:
 
         self.database = Database(schema=schema, base_path="./data/.local.db")
 
+        # Provision companies if database is empty
+        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
+        provisioner.provision()
+
     async def run(self, query: str):
         """Runs the assistant with the given query"""
         self.messages.append(Message(role="developer", status="completed", content=SystemPrompt().format()))
         self.messages.append(Message(role="user", status="completed", content=query))
 
-        actions = [SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
-                                       start_year=self.start_year),
-                   ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
-                                    start_year=self.start_year),
-                   KeywordSearchFilingPagesAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
-                                                  start_year=self.start_year)]
+        actions = [
+            SearchCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            KeywordSearchFilingPagesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            KeywordSearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            KeywordSearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
+            ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year)
+        ]
 
         while self.num_iter < self.max_iter:
             terminate = await self.step(actions=actions)

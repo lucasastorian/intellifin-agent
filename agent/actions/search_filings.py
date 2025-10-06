@@ -10,7 +10,7 @@ AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 
 
 class SearchFilings(BaseModel):
-    """List SEC filings that match basic filters (limited to 50 filings)
+    """Search SEC filings based on the ticker symbol, forms, and start date (limited to 50 filings)
 
     - Use this first to identify filings before reading or searching text.
     - Returns a Markdown table with: id, company name, ticker symbol(s), exchange(s), form, items (for 8-K), press release (X),
@@ -25,8 +25,8 @@ class SearchFilings(BaseModel):
     """
     symbols: List[str] = Field(..., description="Ticker symbols to include (e.g., ['AAPL','MSFT']).", min_length=1)
     forms: List[AllowedForm] = Field(..., description="Forms to include in the search results. ", min_length=1)
-    start_date: str = Field(..., description="Filter by report_date >= this ISO date 'YYYY-MM-DD'.")
-    end_date: Optional[str] = Field(..., description="Filter by report_date <= this ISO date 'YYYY-MM-DD'. "
+    start_date: str = Field(..., description="Filter by filing_date >= this ISO date 'YYYY-MM-DD'.")
+    end_date: Optional[str] = Field(..., description="Filter by filing_date <= this ISO date 'YYYY-MM-DD'. "
                                                      "Defaults to today.")
     include_items: Optional[List[str]] = Field(
         default=None,
@@ -98,6 +98,12 @@ class SearchFilingsAction(BaseAction):
                 action_id=action.id
             )
 
+        # Debug: Check what's in the companies table
+        all_companies = self.database.table("companies").select("*").execute()
+        print(f"  [DEBUG] Total companies in DB: {len(all_companies)}", flush=True)
+        if all_companies:
+            print(f"  [DEBUG] First company: {all_companies[0]}", flush=True)
+
         companies_rows = (
             self.database
             .table("companies")
@@ -105,11 +111,16 @@ class SearchFilingsAction(BaseAction):
             .contains("symbols", args.symbols)
             .execute()
         )
+        print(f"  [DEBUG] Companies found for symbols {args.symbols}: {len(companies_rows)}", flush=True)
 
         company_ids = [r["id"] for r in companies_rows]
         company_by_id = {r["id"]: r for r in companies_rows}
 
         forms = self._expand_forms_with_amendments(args.forms)
+
+        print(f"  [DEBUG] company_ids: {company_ids}", flush=True)
+        print(f"  [DEBUG] forms: {forms}", flush=True)
+        print(f"  [DEBUG] filing_date range: {args.start_date} → {args.end_date or date.today().isoformat()}", flush=True)
 
         qb = (
             self.database
@@ -118,8 +129,8 @@ class SearchFilingsAction(BaseAction):
                 "id,company_id,form,items,press_release,fiscal_year,fiscal_period,filing_date,report_date,accession_number")
             .in_("company_id", company_ids)
             .in_("form", forms)
-            .gte("report_date", args.start_date)
-            .lte("report_date", args.end_date or date.today().isoformat())
+            .gte("filing_date", args.start_date)
+            .lte("filing_date", args.end_date or date.today().isoformat())
         )
 
         if args.include_items:
@@ -127,6 +138,7 @@ class SearchFilingsAction(BaseAction):
                 qb = qb.contains("items", item_code)
 
         filings = qb.order("filing_date", desc=True).limit(50).execute()
+        print(f"  [DEBUG] Found {len(filings)} filings", flush=True)
         if not filings:
             self.log_done("No filings found")
             return Message(role="tool", status="completed", content="No filings in the requested range.",

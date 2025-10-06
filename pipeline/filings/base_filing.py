@@ -17,7 +17,8 @@ class BaseFiling(ABC):
         self.database = database
 
         self.accession_number = filing.accession_number
-        self.report_date = filing.report_date
+        # Convert empty report_date to None (DEF 14A and some other filings don't have report dates)
+        self.report_date = filing.report_date if filing.report_date else None
         self.filing_date = filing.filing_date.strftime('%Y-%m-%d')
 
     @abstractmethod
