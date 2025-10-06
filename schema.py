@@ -121,6 +121,61 @@ class FilingPages(Table):
     __uniques__ = [("filing_id", "page")]
 
 
+class CompanyFilingPages(View):
+    __viewname__ = "company_filing_pages"
+    __tables__ = (FilingPages, Filings, Companies)
+
+    id = Field(table="filing_pages", field="id")
+    page = Field(table="filing_pages", field="page")
+    content = Field(table="filing_pages", field="content")
+
+    filing_id = Field(table="filing_pages", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_pages", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
+class CompanyFilingNotes(View):
+    __viewname__ = "company_filing_notes"
+    __tables__ = (FilingNotes, Filings, Companies)
+
+    id = Field(table="filing_notes", field="id")
+    title = Field(table="filing_notes", field="title")
+    filename = Field(table="filing_notes", field="filename")
+    content = Field(table="filing_notes", field="content")
+
+    filing_id = Field(table="filing_notes", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_notes", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
 class PressReleasePages(Table):
     __tablename__ = "press_release_pages"
 
@@ -137,6 +192,33 @@ class PressReleasePages(Table):
     __uniques__ = [("filing_id", "page")]
 
 
+class CompanyFilingPressReleases(View):
+    __viewname__ = "company_filing_press_releases"
+    __tables__ = (PressReleasePages, Filings, Companies)
+
+    id = Field(table="press_release_pages", field="id")
+    page = Field(table="press_release_pages", field="page")
+    content = Field(table="press_release_pages", field="content")
+
+    filing_id = Field(table="press_release_pages", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="press_release_pages", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
 schema = Schema()
 schema.add_table(Companies)
 schema.add_table(Filings)
@@ -146,3 +228,6 @@ schema.add_table(FilingPages)
 schema.add_table(PressReleasePages)
 
 schema.add_view(CompanyFilings)
+schema.add_view(CompanyFilingPages)
+schema.add_view(CompanyFilingNotes)
+schema.add_view(CompanyFilingPressReleases)

@@ -236,6 +236,7 @@ class JSONField(FieldDescriptor):
     def __init__(self, **kwargs):
         # SQLite doesn't have native JSON type, store as TEXT
         super().__init__("TEXT", **kwargs)
+        self.json = True
 
     def _validate_type(self, value: Any) -> str:
         """Validate and serialize JSON value to string"""
@@ -426,6 +427,7 @@ class Boolean(FieldDescriptor):
 
     def __init__(self, **kwargs):
         super().__init__("INTEGER", **kwargs)
+        self.boolean = True
 
     def _validate_type(self, value: Any) -> int:
         """Validate and convert value to 0 or 1"""

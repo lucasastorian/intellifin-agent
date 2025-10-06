@@ -175,7 +175,7 @@ class Table(metaclass=TableMeta):
                 fks.append(fk)
             if field.index and not field.primary_key:
                 indices.append(
-                    f"CREATE INDEX IF NOT EXISTS idx_{cls.__tablename__}_{name} ON {cls.__tablename__}({name});")
+                    f"CREATE INDEX IF NOT EXISTS `idx_{cls.__tablename__}_{name}` ON `{cls.__tablename__}`(`{name}`);")
 
         # Add composite UNIQUE constraints
         for cols in getattr(cls, '__uniques__', ()):
@@ -193,7 +193,7 @@ class Table(metaclass=TableMeta):
             raise ValueError(
                 f"Table '{cls.__tablename__}' has no columns.")
 
-        base_sql = f"CREATE TABLE IF NOT EXISTS {cls.__tablename__} (\n"
+        base_sql = f"CREATE TABLE IF NOT EXISTS `{cls.__tablename__}` (\n"
         base_sql += ",\n".join(f"    {col}" for col in columns)
         if fks:
             base_sql += ",\n" + ",\n".join(f"    {fk}" for fk in fks)

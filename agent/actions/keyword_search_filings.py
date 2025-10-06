@@ -72,63 +72,19 @@ class KeywordSearchFilingPagesAction(BaseAction):
                 action_id=action.id
             )
 
-        # Get company_id
-        company_result = (
-            self.database
-            .table("companies")
-            .select("id,name,symbols")
-            .contains("symbols", args.symbol)
-            .limit(1)
-            .execute()
-        )
-
-        if not company_result.data:
-            self.log_error(f"Company not found for {args.symbol}")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"Company not found for symbol {args.symbol}",
-                error=True,
-                action_id=action.id
-            )
-
-        company_id = company_result.data[0]['id']
-        company_record = company_result.data[0]
-
         # Map reports to forms
         forms = self._get_forms_for_reports(args.reports)
 
-        # Get filings in date range
-        filings_result = (
-            self.database
-            .table("filings")
-            .select("id,company_id,form,filing_date,accession_number")
-            .eq("company_id", company_id)
-            .in_("form", forms)
-            .gte("filing_date", args.start_date)
-            .lte("filing_date", args.end_date)
-            .execute()
-        )
-
-        if not filings_result.data:
-            self.log_done("No filings in date range")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"No {args.reports.lower()} filings found for {args.symbol} in the requested date range.",
-                action_id=action.id
-            )
-
-        filing_ids = [f['id'] for f in filings_result.data]
-        filing_by_id = {f['id']: f for f in filings_result.data}
-
-        # Keyword search on filing pages
+        # Keyword search on company_filing_pages view
         try:
             results_result = (
                 self.database
-                .table("filing_pages")
-                .keyword_search(args.query, returning="id,filing_id,page,content")
-                .in_("filing_id", filing_ids)
+                .table("company_filing_pages")
+                .keyword_search(args.query, returning="id,filing_id,page,content,form,filing_date,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", forms)
+                .gte("filing_date", args.start_date)
+                .lte("filing_date", args.end_date)
                 .limit(self.limit)
                 .execute()
             )
@@ -141,8 +97,7 @@ class KeywordSearchFilingPagesAction(BaseAction):
             self.log_done("No matches found")
             return Message(role="tool", status="completed", content="No matching pages found.", action_id=action.id)
 
-        company_by_id = {company_id: company_record}
-        content = self._format_results(results_result.data, filing_by_id, company_by_id)
+        content = self._format_results(results_result.data)
 
         unique_filings = len({r['filing_id'] for r in results_result.data})
         summary = f"Found {len(results_result.data)} matching page(s) across {unique_filings} filing(s)"
@@ -171,19 +126,15 @@ class KeywordSearchFilingPagesAction(BaseAction):
         return mapping.get(report_type, [])
 
     @staticmethod
-    def _format_results(results: List[dict], filing_by_id: dict, company_by_id: dict) -> str:
+    def _format_results(results: List[dict]) -> str:
         """Formats search results as markdown"""
         output = []
 
         for r in results:
-            filing = filing_by_id.get(r['filing_id'], {})
-            company = company_by_id.get(filing.get('company_id'), {})
-
-            company_name = company.get('name', 'Unknown')
-            symbols = ','.join(company.get('symbols', []))
-            form = filing.get('form', '?')
-            filing_date = filing.get('filing_date', '?')
-
+            company_name = r.get('company_name', 'Unknown')
+            symbols = ','.join(r.get('company_symbols', []))
+            form = r.get('form', '?')
+            filing_date = r.get('filing_date', '?')
             content = (r.get('content') or '').strip()
 
             output.append(

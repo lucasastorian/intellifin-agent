@@ -104,7 +104,7 @@ class Schema:
             all_sql.append(sql)
 
         for view_cls in self.views.values():
-            view_cls._schema = self
+            view_cls.__bound_schema__ = self
             sql = view_cls.generate_create_sql()
             all_sql.append(sql)
 

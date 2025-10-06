@@ -5,6 +5,7 @@ from agent.actions.read_filing import ReadFilingAction
 from agent.actions.keyword_search_filings import KeywordSearchFilingPagesAction
 from agent.actions.keyword_search_filing_notes import KeywordSearchFilingNotesAction
 from agent.actions.keyword_search_press_releases import KeywordSearchPressReleasesAction
+from agent.actions.keyword_search import KeywordSearchFilingsAction
 from agent.actions.read_press_release import ReadPressReleaseAction
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "KeywordSearchFilingPagesAction",
     "KeywordSearchFilingNotesAction",
     "KeywordSearchPressReleasesAction",
+    "KeywordSearchFilingsAction",
     "ReadPressReleaseAction",
 ]

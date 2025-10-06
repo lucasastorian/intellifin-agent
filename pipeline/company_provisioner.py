@@ -80,7 +80,10 @@ class CompanyProvisioner:
 
         for sec_record in sec_data:
             ticker = sec_record['ticker']
-            csv_record = csv_data.get(ticker, {})
+            csv_record = csv_data.get(ticker)
+
+            if not csv_record:
+                continue
 
             records.append({
                 'name': sec_record['name'],

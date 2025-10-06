@@ -7,12 +7,11 @@ from agent.system_prompts.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, KeywordSearchFilingPagesAction,
-                           KeywordSearchFilingNotesAction, KeywordSearchPressReleasesAction, ReadPressReleaseAction)
+from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, KeywordSearchFilingsAction,
+                           ReadPressReleaseAction)
 
 
 class Agent:
-
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-4o-mini", temperature: float = 1.0, max_iter: int = 5):
@@ -24,7 +23,6 @@ class Agent:
 
         self.database = Database(schema=schema, base_path="./data/.local.db")
 
-        # Provision companies if database is empty
         provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
         provisioner.provision()
 
@@ -34,13 +32,11 @@ class Agent:
         self.messages.append(Message(role="user", status="completed", content=query))
 
         actions = [
-            SearchCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            KeywordSearchFilingPagesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            KeywordSearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            KeywordSearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year),
-            ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent, start_year=self.start_year)
+            SearchCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            KeywordSearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         while self.num_iter < self.max_iter:

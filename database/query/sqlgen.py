@@ -1,0 +1,211 @@
+"""Pure SQL + params generation from IR."""
+from .ir import *
+from typing import List, Tuple
+
+
+class SQLGen:
+    """Stateful SQL generator with parameter collection."""
+
+    def __init__(self, dialect, ctx=None):
+        self.d = dialect
+        self.params: List[Any] = []
+        self.ctx = ctx or {}
+
+    def col(self, c: Col, table_alias: str = "t") -> str:
+        """Generate column reference."""
+        return f"{table_alias}.{self.d.q(c.name)}"
+
+    def lit(self, v: Any) -> str:
+        """Generate parameterized literal."""
+        self.params.append(v)
+        return "?"
+
+    def pred(self, p: Pred, table_alias: str = "t") -> str:
+        """Generate predicate SQL."""
+        if isinstance(p, Eq):
+            if p.val.value is None:
+                return f"{self.col(p.col, table_alias)} IS NULL"
+            return f"{self.col(p.col, table_alias)} = {self.lit(p.val.value)}"
+
+        if isinstance(p, Ne):
+            if p.val.value is None:
+                return f"{self.col(p.col, table_alias)} IS NOT NULL"
+            return f"{self.col(p.col, table_alias)} <> {self.lit(p.val.value)}"
+
+        if isinstance(p, Gt):
+            return f"{self.col(p.col, table_alias)} > {self.lit(p.val.value)}"
+        if isinstance(p, Ge):
+            return f"{self.col(p.col, table_alias)} >= {self.lit(p.val.value)}"
+        if isinstance(p, Lt):
+            return f"{self.col(p.col, table_alias)} < {self.lit(p.val.value)}"
+        if isinstance(p, Le):
+            return f"{self.col(p.col, table_alias)} <= {self.lit(p.val.value)}"
+
+        if isinstance(p, In_):
+            if not p.vals:
+                return "1=0"
+            qs = ", ".join(self.lit(v.value) for v in p.vals)
+            return f"{self.col(p.col, table_alias)} IN ({qs})"
+
+        if isinstance(p, Nin):
+            if not p.vals:
+                return "1=1"
+            qs = ", ".join(self.lit(v.value) for v in p.vals)
+            return f"{self.col(p.col, table_alias)} NOT IN ({qs})"
+
+        if isinstance(p, Ilike):
+            return f"{self.col(p.col, table_alias)} LIKE {self.lit(p.pattern)} {self.d.like_ci()}"
+
+        if isinstance(p, Regex):
+            return f"{self.col(p.col, table_alias)} {self.d.regexp_fn()} {self.lit(p.pattern)}"
+
+        if isinstance(p, ContainsJSON):
+            col_ref = self.col(p.col, table_alias)
+            if isinstance(p.vals, list):
+                qs = ", ".join(self.lit(v.value) for v in p.vals)
+            else:
+                qs = self.lit(p.vals.value)
+
+            array_clause = (
+                f"(json_type({col_ref})='array' AND EXISTS ("
+                f"SELECT 1 FROM json_each({col_ref}) WHERE value IN ({qs})))"
+            )
+            object_clause = (
+                f"(json_type({col_ref})='object' AND EXISTS ("
+                f"SELECT 1 FROM json_each({col_ref}) WHERE key IN ({qs})))"
+            )
+            return f"({array_clause} OR {object_clause})"
+
+        if isinstance(p, KeywordFTS):
+            fts_table = self.ctx.get("fts_table")
+            pk = self.ctx.get("pk")
+            if not fts_table or not pk:
+                raise ValueError("FTS predicate missing planned fts_table/pk")
+            return (
+                f"EXISTS (SELECT 1 FROM {self.d.q(fts_table)} "
+                f"WHERE rowid = {table_alias}.{self.d.q(pk)} "
+                f"AND {self.d.q(fts_table)} MATCH {self.lit(p.query)})"
+            )
+
+        if isinstance(p, And):
+            parts = [self.pred(x, table_alias) for x in p.parts]
+            return "(" + " AND ".join(parts) + ")"
+
+        if isinstance(p, Or):
+            parts = [self.pred(x, table_alias) for x in p.parts]
+            return "(" + " OR ".join(parts) + ")"
+
+        raise TypeError(f"Unhandled predicate {type(p)}")
+
+
+def generate_select(ir: SelectIR, dialect) -> Tuple[str, List[Any]]:
+    """Generate SELECT SQL + params."""
+    g = SQLGen(dialect, ctx={"fts_table": ir.fts_table, "pk": ir.pk})
+
+    if ir.columns is None:
+        cols = "*"
+    else:
+        cols = ", ".join(f"t.{dialect.q(c)}" for c in ir.columns)
+
+    sql = [f"SELECT {cols} FROM {dialect.q(ir.table)} t"]
+
+    if ir.where:
+        sql.append("WHERE " + g.pred(ir.where))
+
+    if ir.order:
+        parts = []
+        for name, desc in ir.order:
+            if "(" in name:
+                parts.append(f"{name} {'DESC' if desc else 'ASC'}")
+            else:
+                parts.append(f"t.{dialect.q(name)} {'DESC' if desc else 'ASC'}")
+        sql.append("ORDER BY " + ", ".join(parts))
+
+    if ir.limit is not None:
+        sql.append(f"LIMIT {int(ir.limit)}")
+
+    return " ".join(sql) + ";", g.params
+
+
+def generate_insert(ir: InsertIR, dialect) -> Tuple[str, List[Any]]:
+    """Generate INSERT SQL + params."""
+    if not ir.rows:
+        raise ValueError("Cannot INSERT zero rows")
+
+    g = SQLGen(dialect)
+    cols = list(ir.rows[0].keys())
+    col_list = ", ".join(dialect.q(c) for c in cols)
+
+    values_clauses = []
+    for row in ir.rows:
+        placeholders = ", ".join(g.lit(row[c]) for c in cols)
+        values_clauses.append(f"({placeholders})")
+
+    sql = f"INSERT INTO {dialect.q(ir.table)} ({col_list}) VALUES {', '.join(values_clauses)} RETURNING *;"
+    return sql, g.params
+
+
+def generate_update(ir: UpdateIR, dialect) -> Tuple[str, List[Any]]:
+    """Generate UPDATE SQL + params."""
+    g = SQLGen(dialect)
+
+    set_clauses = [f"{dialect.q(col)} = {g.lit(val)}" for col, val in ir.assign.items()]
+    sql = [f"UPDATE {dialect.q(ir.table)} SET {', '.join(set_clauses)}"]
+
+    if ir.where:
+        sql.append("WHERE " + g.pred(ir.where, table_alias=dialect.q(ir.table)))
+
+    sql.append("RETURNING *")
+
+    return " ".join(sql) + ";", g.params
+
+
+def generate_delete(ir: DeleteIR, dialect) -> Tuple[str, List[Any]]:
+    """Generate DELETE SQL + params."""
+    g = SQLGen(dialect)
+    sql = [f"DELETE FROM {dialect.q(ir.table)}"]
+
+    if ir.where:
+        sql.append("WHERE " + g.pred(ir.where, table_alias=dialect.q(ir.table)))
+
+    sql.append("RETURNING *")
+
+    return " ".join(sql) + ";", g.params
+
+
+def generate_upsert(ir: UpsertIR, dialect) -> Tuple[str, List[Any]]:
+    """Generate UPSERT (INSERT ... ON CONFLICT) SQL + params."""
+    if not ir.rows:
+        raise ValueError("Cannot UPSERT zero rows")
+
+    g = SQLGen(dialect)
+    cols = list(ir.rows[0].keys())
+    col_list = ", ".join(dialect.q(c) for c in cols)
+
+    values_clauses = []
+    for row in ir.rows:
+        placeholders = ", ".join(g.lit(row[c]) for c in cols)
+        values_clauses.append(f"({placeholders})")
+
+    sql = [f"INSERT INTO {dialect.q(ir.table)} ({col_list}) VALUES {', '.join(values_clauses)}"]
+
+    conflict_cols = ", ".join(dialect.q(c) for c in ir.on_conflict)
+    sql.append(f"ON CONFLICT ({conflict_cols})")
+
+    if ir.do_nothing:
+        sql.append("DO NOTHING")
+    else:
+        update_clauses = [
+            f"{dialect.q(c)} = excluded.{dialect.q(c)}"
+            for c in cols
+            if c not in ir.on_conflict
+        ]
+        if update_clauses:
+            sql.append(f"DO UPDATE SET {', '.join(update_clauses)}")
+        else:
+            sql.append("DO NOTHING")
+
+    if ir.returning_all:
+        sql.append("RETURNING *")
+
+    return " ".join(sql) + ";", g.params

@@ -120,11 +120,11 @@ class View(Table):
     def generate_create_sql(cls) -> str:
         if not cls.__viewname__:
             raise ValueError(f"View class '{cls.__name__}' must set __viewname__")
-        if not hasattr(cls, "_schema") or cls._schema is None:
+        if not hasattr(cls, "__bound_schema__") or cls.__bound_schema__ is None:
             raise RuntimeError(f"View '{cls.__viewname__}' is not bound to a Schema")
 
         cols = cls._collect_view_columns()
-        base, joins = cls._resolve_join_chain(cls._schema)
+        base, joins = cls._resolve_join_chain(cls.__bound_schema__)
 
         select_list = ", ".join([f"{expr} AS `{alias}`" for expr, alias in cols])
         join_sql = " ".join(joins)
