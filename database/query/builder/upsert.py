@@ -70,8 +70,17 @@ class UpsertBuilder:
         num_cols = len(cols)
         max_vars = self.db._get_max_vars()
 
+        # Check if table has vector fields - if so, disable executemany since we need RETURNING
+        table_cls = self.schema.get_table(self.table)
+        has_vector_fields = False
+        if table_cls:
+            for field_name, field in table_cls.get_fields().items():
+                if getattr(field, 'vector', False):
+                    has_vector_fields = True
+                    break
+
         total_params = num_cols * len(serialized_rows)
-        use_executemany = total_params > max_vars
+        use_executemany = total_params > max_vars and not has_vector_fields
 
         all_results = []
         with self.db.transaction():

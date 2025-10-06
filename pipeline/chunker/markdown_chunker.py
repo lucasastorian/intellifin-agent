@@ -17,7 +17,6 @@ class MarkdownChunker:
         Args:
             chunk_size: Maximum token size for each chunk
             chunk_overlap: Number of tokens to overlap between chunks
-            metadata: Optional metadata to add to all chunks
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -124,7 +123,7 @@ class MarkdownChunker:
     def _create_chunk(self, chunks: List[MarkdownChunk], blocks: List[BaseBlock]) -> Tuple[
         List[MarkdownChunk], List[BaseBlock], int]:
         """Creates a chunk, and return a new list of blocks that """
-        chunks.append(MarkdownChunk(blocks=blocks, metadata=self.metadata))
+        chunks.append(MarkdownChunk(blocks=blocks))
 
         if not self.chunk_overlap:
             return chunks, [], 0

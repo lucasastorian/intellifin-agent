@@ -49,7 +49,7 @@ class FieldDescriptor:
         return value
 
     def to_sql(self, name: str) -> str:
-        sql = f"{name} {self.sql_type}"
+        sql = f"`{name}` {self.sql_type}"
         if self.primary_key and self.sql_type == "INTEGER":
             sql += " PRIMARY KEY AUTOINCREMENT"
         elif self.primary_key:

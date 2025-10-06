@@ -66,7 +66,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.order_by = []
         return self
 
-    def vector_search(self, query: str, column: str, topk: int = 50, embedder=None):
+    def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
         """Vector similarity search using brute-force cosine similarity.
 
         Args:
@@ -74,6 +74,7 @@ class SelectBuilder(PredMixin, SelectMixin):
             column: Column name (must have associated vector store)
             topk: Number of results to return
             embedder: Embedder instance (if None, uses db.embedder)
+            return_scores: If True, execute() will return (rows, scores) tuple
 
         Returns:
             self (for chaining .select().execute())
@@ -112,6 +113,9 @@ class SelectBuilder(PredMixin, SelectMixin):
         # Search vector store
         ids, scores = vector_store.search(query_vec, topk=topk, filter_ids=filter_ids)
 
+        # Store scores for later retrieval if requested
+        self._vector_scores = dict(zip(ids.tolist(), scores.tolist())) if return_scores else None
+
         # Filter by returned IDs
         if len(ids) == 0:
             # No results - add impossible predicate
@@ -141,6 +145,9 @@ class SelectBuilder(PredMixin, SelectMixin):
         processed = []
         for row in rows:
             row = self.db._deserialize_json_fields(self.table, row)
+            # Attach vector score if available
+            if hasattr(self, '_vector_scores') and self._vector_scores and 'id' in row:
+                row['_score'] = self._vector_scores.get(row['id'], 0.0)
             processed.append(row)
 
         return Result(processed)

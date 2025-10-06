@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Union, List, Dict, Any
 from .schema.schema import Schema
 from .vector_store import VectorStore
+from .embeddings.voyage_embeddings import VoyageEmbeddings
 from .errors import (
     DatabaseError, ConstraintError, ForeignKeyError,
     UniqueConstraintError, NotNullViolation, CheckConstraintError
@@ -107,12 +108,7 @@ class Database:
 
     def _init_embedder(self):
         """Initialize Voyage embedder (512d, voyage-3.5-lite)"""
-        try:
-            from embeddings.voyage import VoyageEmbeddings
-            self.embedder = VoyageEmbeddings(model="voyage-3.5-lite", dimensions=512)
-        except ImportError:
-            # Embedder is optional - only needed for vector search
-            self.embedder = None
+        self.embedder = VoyageEmbeddings(model="voyage-3.5-lite", dimensions=512)
 
     def get_or_create_vector_store(self, table: str, column: str) -> VectorStore:
         """Get or create a vector store for a table/column pair"""

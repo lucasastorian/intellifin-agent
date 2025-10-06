@@ -12,4 +12,7 @@ venv/
 .local.db-shm
 .local.db-wal
 
+data/vectors/
+cache/
+
 .DS_Store

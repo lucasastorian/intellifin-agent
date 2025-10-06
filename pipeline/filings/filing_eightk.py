@@ -12,9 +12,11 @@ class FilingEightK(BaseFiling):
 
         filing_id = self._upsert_filing(xbrl=xbrl)
         pages = self._upsert_filing_pages(filing_id=filing_id)
-        self._upsert_press_release_pages(filing_id=filing_id)
+        press_release_pages = self._upsert_press_release_pages(filing_id=filing_id)
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
+        if press_release_pages:
+            self._upsert_press_release_chunks(pages=press_release_pages, filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
@@ -36,7 +38,7 @@ class FilingEightK(BaseFiling):
         documents = self.filing.attachments.documents
         press_release = next((document for document in documents if document.document_type == "EX-99.1"), None)
         if not press_release:
-            return
+            return None
 
         parser = Parser(content=press_release.content)
         pages = parser.get_pages()
@@ -47,3 +49,20 @@ class FilingEightK(BaseFiling):
             "filing_id": filing_id,
             "company_id": self.company_id
         } for page in pages], on_conflict="filing_id,page").execute()
+
+        return pages
+
+    def _upsert_press_release_chunks(self, pages: list, filing_id: int):
+        """Chunks the press release pages and upserts them"""
+        chunks = self.markdown_chunker.split(pages=pages)
+
+        data = [
+            {
+                "index": i,
+                "page": chunk.page,
+                "content": chunk.content,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            } for i, chunk in enumerate(chunks)]
+
+        self.database.table("press_release_chunks").upsert(data, on_conflict="filing_id,index").execute()

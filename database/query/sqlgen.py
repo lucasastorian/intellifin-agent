@@ -92,34 +92,38 @@ class SQLGen:
 
             # Single value: fast path with direct comparison
             if not isinstance(p.vals, list):
-                val_param = self.lit(p.vals.value)
+                # Generate separate params for array and object checks since we can't reuse placeholders
+                val_param_array = self.lit(p.vals.value)
+                val_param_object = self.lit(p.vals.value)
                 # For arrays: check if value exists
                 # For objects: check if key exists
                 array_clause = (
                     f"(json_type({col_ref})='array' AND EXISTS ("
-                    f"SELECT 1 FROM json_each({col_ref}) WHERE value = {val_param}))"
+                    f"SELECT 1 FROM json_each({col_ref}) WHERE value = {val_param_array}))"
                 )
                 object_clause = (
                     f"(json_type({col_ref})='object' AND EXISTS ("
-                    f"SELECT 1 FROM json_each({col_ref}) WHERE key = {val_param}))"
+                    f"SELECT 1 FROM json_each({col_ref}) WHERE key = {val_param_object}))"
                 )
                 return f"({array_clause} OR {object_clause})"
 
             # Multiple values: use JSON array param to avoid N*M correlated subqueries
             import json
             vals_json = json.dumps([v.value for v in p.vals])
-            vals_param = self.lit(vals_json)
+            # Need separate params for array and object clauses
+            vals_param_array = self.lit(vals_json)
+            vals_param_object = self.lit(vals_json)
 
             # Use a single EXISTS with json_each on both the column AND the param
             # Check if ANY value from our param list exists in the column
             array_clause = (
                 f"(json_type({col_ref})='array' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param}) p "
+                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param_array}) p "
                 f"WHERE c.value = p.value))"
             )
             object_clause = (
                 f"(json_type({col_ref})='object' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param}) p "
+                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param_object}) p "
                 f"WHERE c.key = p.value))"
             )
             return f"({array_clause} OR {object_clause})"

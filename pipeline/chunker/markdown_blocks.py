@@ -1,8 +1,32 @@
 import re
-import nltk
-import tiktoken
+import voyageai
 from abc import ABC
-from typing import List
+from typing import List, Optional
+
+
+# Shared Voyage tokenizer instance
+_voyage_client: Optional[voyageai.Client] = None
+_voyage_model = "voyage-3.5-lite"
+
+
+def _get_voyage_client() -> voyageai.Client:
+    """Get or create shared Voyage client for token counting"""
+    global _voyage_client
+    if _voyage_client is None:
+        import os
+        api_key = os.environ.get("VOYAGE_API_KEY")
+        if not api_key:
+            raise ValueError("VOYAGE_API_KEY environment variable must be set")
+        _voyage_client = voyageai.Client(api_key=api_key)
+    return _voyage_client
+
+
+def split_sentences(text: str) -> List[str]:
+    """Simple regex-based sentence splitter"""
+    # Split on .!? followed by whitespace and capital letter or end of string
+    # Handles common abbreviations like Mr., Dr., Inc., etc.
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    return [s.strip() for s in sentences if s.strip()]
 
 
 class BaseBlock(ABC):
@@ -14,8 +38,8 @@ class BaseBlock(ABC):
 
     @property
     def tokens(self) -> int:
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        return len(encoding.encode(self.content))
+        client = _get_voyage_client()
+        return client.count_tokens([self.content], model=_voyage_model)
 
 
 class Sentence:
@@ -25,8 +49,8 @@ class Sentence:
 
     @property
     def tokens(self) -> int:
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        return len(encoding.encode(self.content))
+        client = _get_voyage_client()
+        return client.count_tokens([self.content], model=_voyage_model)
 
 
 class TextBlock(BaseBlock):
@@ -38,7 +62,7 @@ class TextBlock(BaseBlock):
     @property
     def sentences(self) -> List[Sentence]:
         """Returns the text block sentences"""
-        return [Sentence(content=content) for content in nltk.sent_tokenize(self.content)]
+        return [Sentence(content=content) for content in split_sentences(self.content)]
 
     @classmethod
     def from_sentences(cls, sentences: List[Sentence], page: int):
@@ -58,7 +82,7 @@ class AudioParagraphBlock(BaseBlock):
     @property
     def sentences(self) -> List[Sentence]:
         """Returns the text block sentences"""
-        return [Sentence(content=content) for content in nltk.sent_tokenize(self.content)]
+        return [Sentence(content=content) for content in split_sentences(self.content)]
 
     def format(self) -> dict:
         """Formats the audio paragraphs"""

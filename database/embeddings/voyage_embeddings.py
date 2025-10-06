@@ -1,18 +1,19 @@
 import os
 import logging
 import voyageai
-from typing import List, Literal
+from typing import List, Literal, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from ..utils.rate_limiters.token_limiter import TokenRateLimiter
 from ..utils.rate_limiters.request_limiter import RequestRateLimiter
 from ..utils.voyage_limits import VoyageLimits
+from .embedding_cache import EmbeddingCache
 
 
 class VoyageEmbeddings:
     max_batch_size: int = 1000
 
-    def __init__(self, model: str = "voyage-3.5-lite", dimensions: int = 512):
+    def __init__(self, model: str = "voyage-3.5-lite", dimensions: int = 512, cache: bool = True):
         self.provider = "voyageai"
         self.model = model
         self.dimensions = dimensions
@@ -32,17 +33,58 @@ class VoyageEmbeddings:
 
         self.client = voyageai.Client(api_key=api_key)
 
+        # Initialize cache
+        self.cache = EmbeddingCache(model=model) if cache else None
+
     def query_vector(self, text: str) -> List[float]:
         """Generates a single query vector"""
         return self._embed(texts=[text], input_type="query")[0]
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         """Generates a flat list of embeddings for all texts."""
-        return [
-            embedding
-            for batch in self._batch_texts(texts=texts)
-            for embedding in self._embed(batch, input_type="document")
-        ]
+        if not self.cache:
+            # No cache - embed everything
+            return [
+                embedding
+                for batch in self._batch_texts(texts=texts)
+                for embedding in self._embed(batch, input_type="document")
+            ]
+
+        # Check cache for each text
+        cached = self.cache.get_many(texts)
+
+        # Separate cached vs uncached
+        uncached_texts = []
+        uncached_indices = []
+        for i, (text, cached_emb) in enumerate(zip(texts, cached)):
+            if cached_emb is None:
+                uncached_texts.append(text)
+                uncached_indices.append(i)
+
+        # Embed uncached texts
+        if uncached_texts:
+            logging.debug(f"Cache miss: {len(uncached_texts)}/{len(texts)} texts")
+            new_embeddings = [
+                embedding
+                for batch in self._batch_texts(texts=uncached_texts)
+                for embedding in self._embed(batch, input_type="document")
+            ]
+            # Cache new embeddings
+            self.cache.set_many(uncached_texts, new_embeddings)
+        else:
+            logging.debug(f"Cache hit: {len(texts)}/{len(texts)} texts")
+            new_embeddings = []
+
+        # Reconstruct full list with cached + new embeddings
+        results = cached[:]
+        for idx, emb in zip(uncached_indices, new_embeddings):
+            results[idx] = emb
+
+        return results
+
+    def count_tokens(self, texts: List[str]) -> int:
+        """Returns the number of tokens"""
+        return self.client.count_tokens(texts, model=self.model)
 
     @retry(
         stop=stop_after_attempt(3),

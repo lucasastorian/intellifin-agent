@@ -110,6 +110,7 @@ class FilingChunks(Table):
 
     id = Serial()
 
+    index = Integer(nullable=False)
     page = Integer(nullable=False)
     content = Text(nullable=False, fts=True, vector=True)
 
@@ -118,6 +119,8 @@ class FilingChunks(Table):
 
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_id", "index")]
 
 
 class FilingPages(Table):
@@ -207,6 +210,24 @@ class PressReleasePages(Table):
     __uniques__ = [("filing_id", "page")]
 
 
+class PressReleaseChunks(Table):
+    __tablename__ = "press_release_chunks"
+
+    id = Serial()
+
+    index = Integer(nullable=False)
+    page = Integer(nullable=False)
+    content = Text(nullable=False, fts=True, vector=True)
+
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_id", "index")]
+
+
 class CompanyFilingPressReleases(View):
     __viewname__ = "company_filing_press_releases"
     __tables__ = (PressReleasePages, Filings, Companies)
@@ -242,6 +263,7 @@ schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
 schema.add_table(FilingChunks)
 schema.add_table(PressReleasePages)
+schema.add_table(PressReleaseChunks)
 
 schema.add_view(CompanyFilings)
 schema.add_view(CompanyFilingPages)

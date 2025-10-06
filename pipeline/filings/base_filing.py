@@ -31,7 +31,8 @@ class BaseFiling(ABC):
 
     def exists(self):
         """Returns True if an entry for the filing exists in the DB"""
-        return len(self.database.table("filings").select("*").eq("accession_number", self.accession_number).execute()) > 0
+        return len(
+            self.database.table("filings").select("*").eq("accession_number", self.accession_number).execute()) > 0
 
     @abstractmethod
     def _upsert_filing(self, xbrl: XBRL):
@@ -112,12 +113,13 @@ class BaseFiling(ABC):
 
         data = [
             {
+                "index": i,
                 "page": chunk.page,
                 "content": chunk.content,
                 "filing_id": filing_id,
                 "company_id": self.company_id
-            } for chunk in chunks]
+            } for i, chunk in enumerate(chunks)]
 
-        response = self.database.table("filing_chunks").upsert(data).execute()
+        response = self.database.table("filing_chunks").upsert(data, on_conflict="filing_id,index").execute()
 
-        return response.data[0]['id']
+        return response.data
