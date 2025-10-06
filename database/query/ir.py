@@ -113,6 +113,7 @@ class SelectIR:
     fts_rank_expr: Optional[str] = None
     pk: Optional[str] = None
     fts_table: Optional[str] = None
+    fts_query: Optional[str] = None
 
 
 @dataclass(frozen=True)

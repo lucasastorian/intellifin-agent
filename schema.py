@@ -11,7 +11,7 @@ class Companies(Table):
     symbols = JSONField(nullable=False, index=True)
     exchanges = JSONField(nullable=True, index=True)
     cik = Text(nullable=False, unique=True, index=True)
-    sic = Text(nullable=False, index=True)
+    sic = Text(nullable=True, index=False)
     sector = Text(nullable=True)
     industry = Text(nullable=True)
     market_cap = Float(nullable=True)

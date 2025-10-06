@@ -34,20 +34,24 @@ def plan_select(ir: SelectIR, schema, dialect) -> Tuple[SelectIR, Dict]:
     if not ir.fts_table:
         raise ValueError("Planner: missing fts_table (binder must provide it)")
 
-    rank_expr = dialect.bm25(ir.fts_table)
-
-    order = ir.order if ir.order else [(rank_expr, False)]
-    if ir.pk and (ir.pk, False) not in order:
-        order = list(order) + [(ir.pk, False)]
+    # Create correlated subquery for rank that brings FTS table into scope
+    # SELECT (SELECT bm25(fts) FROM fts WHERE rowid = t.pk AND fts MATCH ?) AS _rank
+    rank_expr = (
+        f"(SELECT {dialect.bm25(ir.fts_table)} "
+        f"FROM {dialect.q(ir.fts_table)} "
+        f"WHERE rowid = t.{dialect.q(ir.pk)} "
+        f"AND {dialect.q(ir.fts_table)} MATCH ?)"
+    )
 
     planned = SelectIR(
         table=ir.table,
         columns=ir.columns,
         where=ir.where,
-        order=order,
+        order=ir.order,  # Keep user-specified order if any
         limit=ir.limit,
         fts_rank_expr=rank_expr,
         pk=ir.pk,
         fts_table=ir.fts_table,
+        fts_query=ir.fts_query,
     )
     return planned, {"fts_table": ir.fts_table, "fts_col": fts_col}

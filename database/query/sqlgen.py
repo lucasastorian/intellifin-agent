@@ -62,17 +62,19 @@ class SQLGen:
         if isinstance(p, ContainsJSON):
             col_ref = self.col(p.col, table_alias)
             if isinstance(p.vals, list):
-                qs = ", ".join(self.lit(v.value) for v in p.vals)
+                qs_array = ", ".join(self.lit(v.value) for v in p.vals)
+                qs_object = ", ".join(self.lit(v.value) for v in p.vals)
             else:
-                qs = self.lit(p.vals.value)
+                qs_array = self.lit(p.vals.value)
+                qs_object = self.lit(p.vals.value)
 
             array_clause = (
                 f"(json_type({col_ref})='array' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) WHERE value IN ({qs})))"
+                f"SELECT 1 FROM json_each({col_ref}) WHERE value IN ({qs_array})))"
             )
             object_clause = (
                 f"(json_type({col_ref})='object' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) WHERE key IN ({qs})))"
+                f"SELECT 1 FROM json_each({col_ref}) WHERE key IN ({qs_object})))"
             )
             return f"({array_clause} OR {object_clause})"
 
@@ -100,12 +102,26 @@ class SQLGen:
 
 def generate_select(ir: SelectIR, dialect) -> Tuple[str, List[Any]]:
     """Generate SELECT SQL + params."""
+    import sys
     g = SQLGen(dialect, ctx={"fts_table": ir.fts_table, "pk": ir.pk})
 
+    # If we project a correlated rank subquery, add its MATCH param first
+    if ir.fts_rank_expr and ir.fts_query is not None:
+        g.params.append(ir.fts_query)
+
+    # Debug logging
+    # if ir.fts_table:
+    #     print(f"[FTS DEBUG] fts_table={ir.fts_table}, fts_rank_expr={ir.fts_rank_expr}, order={ir.order}", file=sys.stderr)
+
     if ir.columns is None:
-        cols = "*"
+        if ir.fts_rank_expr:
+            cols = f"t.*, {ir.fts_rank_expr} AS _rank"
+        else:
+            cols = "t.*"
     else:
         cols = ", ".join(f"t.{dialect.q(c)}" for c in ir.columns)
+        if ir.fts_rank_expr:
+            cols += f", {ir.fts_rank_expr} AS _rank"
 
     sql = [f"SELECT {cols} FROM {dialect.q(ir.table)} t"]
 
@@ -115,16 +131,27 @@ def generate_select(ir: SelectIR, dialect) -> Tuple[str, List[Any]]:
     if ir.order:
         parts = []
         for name, desc in ir.order:
-            if "(" in name:
+            if "(" in name or "__fts" in name or "." in name or "`" in name:
                 parts.append(f"{name} {'DESC' if desc else 'ASC'}")
             else:
                 parts.append(f"t.{dialect.q(name)} {'DESC' if desc else 'ASC'}")
         sql.append("ORDER BY " + ", ".join(parts))
+    elif ir.fts_rank_expr:
+        # Default FTS ordering: rank ascending, then PK
+        pk_col = f"t.{dialect.q(ir.pk)}" if ir.pk else "t.rowid"
+        sql.append(f"ORDER BY _rank ASC, {pk_col} ASC")
 
     if ir.limit is not None:
         sql.append(f"LIMIT {int(ir.limit)}")
 
-    return " ".join(sql) + ";", g.params
+    final_sql = " ".join(sql) + ";"
+
+    # Debug logging
+    # if ir.fts_table:
+    #     print(f"[FTS DEBUG SQL] {final_sql}", file=sys.stderr)
+    #     print(f"[FTS DEBUG PARAMS] {g.params}", file=sys.stderr)
+
+    return final_sql, g.params
 
 
 def generate_insert(ir: InsertIR, dialect) -> Tuple[str, List[Any]]:

@@ -1,4 +1,5 @@
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
 
@@ -51,15 +52,22 @@ class Company:
     def _upsert_filings(self, company_id: int):
         filings = self._load_filings()
 
-        for filing in filings:
+        def upsert_filing(filing: EntityFiling):
             parser = self._get_filing_parser(filing=filing, company_id=company_id)
             parser.upsert()
+            return filing.form
+
+        with ThreadPoolExecutor(max_workers=9) as executor:
+            futures = {executor.submit(upsert_filing, filing): filing for filing in filings}
+
+            for future in as_completed(futures):
+                future.result()
 
     def _get_company_id(self) -> int:
-        response = self.database.table("companies").select("id").eq("cik", self.company.cik).limit(1).execute()
+        response = self.database.table("companies").select("id").contains("symbols", self.symbol).limit(1).execute()
 
         if not response.data:
-            raise ValueError(f"Company with CIK {self.company.cik} not found. Ensure companies are provisioned.")
+            raise ValueError(f"Company with Symbol {self.symbol} not found. Ensure companies are provisioned.")
 
         return response.data[0]['id']
 

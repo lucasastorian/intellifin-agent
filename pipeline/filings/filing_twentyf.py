@@ -1,3 +1,4 @@
+import logging
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
@@ -8,6 +9,9 @@ class FilingTwentyF(BaseFiling):
     def upsert(self):
         """Upserts the DEF 14A filing"""
         xbrl = self.filing.xbrl()
+
+        if xbrl is None:
+            logging.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
         self._upsert_filing_pages(filing_id=filing_id)
@@ -30,4 +34,4 @@ class FilingTwentyF(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response['data'][0]['id']
+        return response.data[0]['id']

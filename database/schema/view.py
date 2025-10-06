@@ -75,10 +75,8 @@ class View(Table):
                 if not candidates:
                     continue
                 if len(candidates) > 1:
-                    raise ValueError(
-                        f"View '{cls.__viewname__}': ambiguous join to '{R}'. "
-                        f"Multiple FK routes found from {joined}. Ensure only one FK path exists."
-                    )
+                    # Prefer FK from the most recently joined table (most direct path)
+                    candidates.sort(key=lambda c: joined.index(c[0]), reverse=True)
                 (L, Lc, Rt, Rc) = candidates[0]
                 joins.append(f"LEFT JOIN `{Rt}` ON `{L}`.`{Lc}` = `{Rt}`.`{Rc}`")
                 joined.append(R)

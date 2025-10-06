@@ -36,9 +36,9 @@ class KeywordSearchFilings(BaseModel):
         _ = date.fromisoformat(v)
         return v
 
-    @classmethod
     @field_validator("end_date")
-    def check_end_date(cls, v: Optional[str]) -> Optional[str]:
+    @classmethod
+    def check_end_date(cls, v: Optional[str]) -> str:
         if v is None:
             return date.today().isoformat()
         _ = date.fromisoformat(v)
@@ -118,7 +118,8 @@ class KeywordSearchFilingsAction(BaseAction):
             result = (
                 self.database
                 .table("company_filing_pages")
-                .keyword_search(args.query, returning="id,filing_id,page,content,form,filing_date,company_name,company_symbols")
+                .keyword_search(args.query, "content")
+                .select("id,filing_id,page,content,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
@@ -129,7 +130,7 @@ class KeywordSearchFilingsAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'filing_page'
-                r['_score'] = result.score[result.data.index(r)] if result.score else 0
+                r['_score'] = r.get('_rank', 0)
 
             return result.data
         except Exception as e:
@@ -142,7 +143,8 @@ class KeywordSearchFilingsAction(BaseAction):
             result = (
                 self.database
                 .table("company_filing_notes")
-                .keyword_search(args.query, returning="id,filing_id,title,content,form,filing_date,company_name,company_symbols")
+                .keyword_search(args.query, "content")
+                .select("id,filing_id,title,content,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
@@ -153,7 +155,7 @@ class KeywordSearchFilingsAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'filing_note'
-                r['_score'] = result.score[result.data.index(r)] if result.score else 0
+                r['_score'] = r.get('_rank', 0)
 
             return result.data
         except Exception as e:
@@ -166,7 +168,8 @@ class KeywordSearchFilingsAction(BaseAction):
             result = (
                 self.database
                 .table("company_filing_press_releases")
-                .keyword_search(args.query, returning="id,filing_id,page,content,form,filing_date,company_name,company_symbols")
+                .keyword_search(args.query, "content")
+                .select("id,filing_id,page,content,form,filing_date,report_date,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", ['8-K', '8-K/A'])
                 .eq("press_release", True)
@@ -178,7 +181,7 @@ class KeywordSearchFilingsAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'press_release'
-                r['_score'] = result.score[result.data.index(r)] if result.score else 0
+                r['_score'] = r.get('_rank', 0)
 
             return result.data
         except Exception as e:
@@ -238,10 +241,16 @@ class KeywordSearchFilingsAction(BaseAction):
         symbols = ','.join(r.get('company_symbols', []))
         form = r.get('form', '?')
         filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
+        fiscal_year = r.get('fiscal_year', '')
+        fiscal_period = r.get('fiscal_period', '')
         content = (r.get('content') or '').strip()
 
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+
         return (
-            f"**[Filing Page] #{r['filing_id']} - Page {r['page']}** | {company_name} ({symbols}) | {form} | {filing_date}\n\n"
+            f"**[Filing Page] #{r['filing_id']} - Page {r['page']}** | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+            (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
             f"{content}\n\n---\n"
         )
 
@@ -252,11 +261,17 @@ class KeywordSearchFilingsAction(BaseAction):
         symbols = ','.join(r.get('company_symbols', []))
         form = r.get('form', '?')
         filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
+        fiscal_year = r.get('fiscal_year', '')
+        fiscal_period = r.get('fiscal_period', '')
         title = r.get('title', 'Untitled Note')
         content = (r.get('content') or '').strip()
 
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+
         return (
-            f"**[Note] {title}** | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | {filing_date}\n\n"
+            f"**[Note] {title}** | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+            (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
             f"{content}\n\n---\n"
         )
 
@@ -267,9 +282,10 @@ class KeywordSearchFilingsAction(BaseAction):
         symbols = ','.join(r.get('company_symbols', []))
         form = r.get('form', '?')
         filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
         content = (r.get('content') or '').strip()
 
         return (
-            f"**[Press Release] #{r['filing_id']} - Page {r['page']}** | {company_name} ({symbols}) | {form} | {filing_date}\n\n"
+            f"**[Press Release] #{r['filing_id']} - Page {r['page']}** | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}\n\n" +
             f"{content}\n\n---\n"
         )

@@ -71,6 +71,7 @@ class CompanyProvisioner:
                 'name': row[1],
                 'ticker': row[2].strip().upper(),
                 'exchange': row[3],
+                'sic': None,
             })
 
         return records
@@ -90,7 +91,7 @@ class CompanyProvisioner:
                 'symbols': [ticker],
                 'exchanges': [sec_record['exchange']],
                 'cik': sec_record['cik'],
-                'sic': '',
+                'sic': sec_record['sic'],
                 'sector': csv_record.get('sector'),
                 'industry': csv_record.get('industry'),
                 'market_cap': csv_record.get('market_cap'),

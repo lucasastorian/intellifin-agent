@@ -84,34 +84,38 @@ def bind_pred(schema, table: str, pred: Pred) -> Tuple[Pred, Dict]:
     col = pred.col.name
     meta = _field_meta(schema, table, col)
     base_col = meta["base_col"]
+    is_view = table in schema.views
+    # For views, keep the view column name; for tables, use base_col
+    resolved_col = col if is_view else base_col
 
     if isinstance(pred, (Eq, Ne, Gt, Ge, Lt, Le)):
         lit = _normalize_bool(meta, pred.val)
-        return type(pred)(Col(base_col), lit), {}
+        return type(pred)(Col(resolved_col), lit), {}
 
     elif isinstance(pred, (In_, Nin)):
         vals = [_normalize_bool(meta, v) for v in pred.vals]
-        return type(pred)(Col(base_col), vals), {}
+        return type(pred)(Col(resolved_col), vals), {}
 
     elif isinstance(pred, Ilike):
-        return Ilike(Col(base_col), pred.pattern), {}
+        return Ilike(Col(resolved_col), pred.pattern), {}
 
     elif isinstance(pred, Regex):
-        return Regex(Col(base_col), pred.pattern), {}
+        return Regex(Col(resolved_col), pred.pattern), {}
 
     elif isinstance(pred, ContainsJSON):
         if not meta["is_json"]:
             raise ValueError(f"Column '{col}' is not JSON-enabled on '{table}'")
-        return ContainsJSON(Col(base_col), pred.vals), {}
+        return ContainsJSON(Col(resolved_col), pred.vals), {}
 
     elif isinstance(pred, KeywordFTS):
         if not meta["is_fts"]:
             raise ValueError(f"Column '{col}' is not FTS-enabled on '{table}'")
-        return KeywordFTS(Col(base_col), pred.query), {
+        return KeywordFTS(Col(resolved_col), pred.query), {
             "fts": True,
             "fts_table": f"{meta['base_table']}__{base_col}__fts",
             "fts_col": base_col,
             "pk": meta["pk"],
+            "fts_query": pred.query,
         }
 
     return pred, {}
@@ -133,6 +137,7 @@ def bind_select(ir: SelectIR, schema) -> SelectIR:
         fts_rank_expr=None,
         pk=fts_info.get("pk"),
         fts_table=fts_info.get("fts_table"),
+        fts_query=fts_info.get("fts_query"),
     )
 
 

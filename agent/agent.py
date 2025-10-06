@@ -3,7 +3,7 @@ from typing import List, Optional
 from schema import schema
 from database import Database
 from pipeline.company_provisioner import CompanyProvisioner
-from agent.system_prompts.system_prompt import SystemPrompt
+from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
@@ -12,9 +12,10 @@ from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilin
 
 
 class Agent:
+
     start_year: int = 2018
 
-    def __init__(self, edgar_user_agent: str, model: str = "gpt-4o-mini", temperature: float = 1.0, max_iter: int = 5):
+    def __init__(self, edgar_user_agent: str, model: str = "gpt-5-mini", temperature: float = 1.0, max_iter: int = 10):
         self.edgar_user_agent = edgar_user_agent
         self.client = OpenAIClient(model=model, temperature=temperature)
         self.num_iter = 0
@@ -28,7 +29,7 @@ class Agent:
 
     async def run(self, query: str):
         """Runs the assistant with the given query"""
-        self.messages.append(Message(role="developer", status="completed", content=SystemPrompt().format()))
+        self.messages.append(Message(role="system", status="completed", content=SystemPrompt().format()))
         self.messages.append(Message(role="user", status="completed", content=query))
 
         actions = [

@@ -23,18 +23,18 @@ class SearchCompaniesAction(BaseAction):
 
     async def call(self, action: Action):
         """Searches companies by name"""
+        self.log_start("SearchCompanies")
+
         try:
             args = self.validate(action)
         except RuntimeError as e:
-            self.log_start("SearchCompanies")
+
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
         params = f"'{args.query}'"
         self.log_start("SearchCompanies", params)
 
-        # Get all companies and filter in Python (simple approach)
-        # TODO: Add LIKE/ILIKE support to query builder for more efficient filtering
         result = (
             self.database
             .table("companies")
@@ -42,14 +42,12 @@ class SearchCompaniesAction(BaseAction):
             .execute()
         )
 
-        # Case-insensitive partial match
         query_lower = args.query.lower()
         matches = [
             c for c in result.data
             if query_lower in c['name'].lower()
         ]
 
-        # Limit results
         matches = matches[:self.limit]
 
         if not matches:

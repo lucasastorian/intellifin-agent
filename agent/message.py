@@ -13,7 +13,7 @@ class Action:
 
 @dataclass
 class Message:
-    role: Literal['developer', 'user', 'assistant', 'tool']
+    role: Literal['system', 'user', 'assistant', 'tool']
     status: Literal['in_progress', 'completed', 'failed']
     content: str
     actions: List[Action] = None

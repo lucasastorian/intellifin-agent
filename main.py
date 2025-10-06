@@ -8,9 +8,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('query', type=str, help='Query to send to the agent')
-    parser.add_argument('--model', type=str, default='gpt-4o-mini', help='Model to use (default: gpt-4o-mini)')
+    parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5-mini)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
-    parser.add_argument('--max-iter', type=int, default=5, help='Max iterations (default: 5)')
+    parser.add_argument('--max-iter', type=int, default=10, help='Max iterations (default: 10)')
 
     args = parser.parse_args()
 

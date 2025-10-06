@@ -51,6 +51,9 @@ class BaseFiling(ABC):
 
     def _upsert_filing_notes(self, filing_id: int):
         """Upserts all the notes associated with the filing"""
+        if not self.filing.reports:
+            return None
+
         notes = self.filing.reports.get_by_category("Notes")
         processed_notes = []
 
@@ -64,8 +67,11 @@ class BaseFiling(ABC):
 
         self.database.table("filing_notes").upsert(processed_notes, on_conflict="filing_id,filename").execute()
 
-    def _upsert_financial_statements(self, xbrl: XBRL, filing_id: int):
+    def _upsert_financial_statements(self, xbrl: Optional[XBRL], filing_id: int):
         """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
+        if xbrl is None:
+            return
+
         statements = FinancialStatements(xbrl=xbrl, report_date=self.report_date, filing_id=filing_id,
                                          company_id=self.company_id, database=self.database)
         statements.upsert_statements()

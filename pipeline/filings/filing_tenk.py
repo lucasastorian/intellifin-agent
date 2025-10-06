@@ -1,4 +1,6 @@
+import logging
 from edgar.xbrl import XBRL
+from typing import Optional
 
 from pipeline.filings.base_filing import BaseFiling
 
@@ -9,15 +11,18 @@ class FilingTenK(BaseFiling):
         """Upserts the 10-K filing and associated pages"""
         xbrl = self.filing.xbrl()
 
+        if xbrl is None:
+            logging.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
+
         filing_id = self._upsert_filing(xbrl=xbrl)
         self._upsert_filing_pages(filing_id=filing_id)
         self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
 
-    def _upsert_filing(self, xbrl: XBRL) -> int:
+    def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""
-        fiscal_year = xbrl.entity_info['fiscal_year']
-        fiscal_period = xbrl.entity_info['fiscal_period']
+        fiscal_year = xbrl.entity_info['fiscal_year'] if xbrl else None
+        fiscal_period = xbrl.entity_info['fiscal_period'] if xbrl else None
 
         response = self.database.table("filings").upsert({
             "form": self.filing.form,
@@ -30,4 +35,4 @@ class FilingTenK(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response['data'][0]['id']
+        return response.data[0]['id']

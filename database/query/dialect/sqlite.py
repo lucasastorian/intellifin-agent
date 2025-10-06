@@ -14,8 +14,16 @@ class SQLiteDialect:
         """Return the REGEXP function name."""
         return "REGEXP"
 
-    def bm25(self, fts_table: str) -> str:
-        """Return BM25 ranking expression for FTS table."""
+    def bm25(self, fts_table: str, weights: tuple = None) -> str:
+        """Return BM25 ranking expression for FTS table.
+
+        Args:
+            fts_table: Name of the FTS virtual table
+            weights: Optional per-column weights (e.g., (0.2, 1.0) to down-weight first column)
+        """
+        if weights:
+            args = ", ".join(str(w) for w in weights)
+            return f"bm25({self.q(fts_table)}, {args})"
         return f"bm25({self.q(fts_table)})"
 
     def like_ci(self) -> str:

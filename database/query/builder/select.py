@@ -1,4 +1,6 @@
 """SELECT query builder."""
+import re
+from typing import Optional
 from .mixins import PredMixin, SelectMixin
 from ..ir import SelectIR, KeywordFTS, Col
 from ..binder import bind_select
@@ -6,6 +8,9 @@ from ..planner import plan_select
 from ..sqlgen import generate_select
 from ..dialect.sqlite import SQLiteDialect
 from ...results import Result
+
+# Split at letter-digit boundaries (FY2025 -> FY 2025, Q4 -> Q 4)
+ALNUM_SPLIT = re.compile(r"(?<=\D)(?=\d)|(?<=\d)(?=\D)")
 
 
 class SelectBuilder(PredMixin, SelectMixin):
@@ -22,8 +27,41 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.limit_n = None
 
     def keyword_search(self, query: str, column: str):
-        """Full-text search on FTS-enabled column."""
-        self._and(KeywordFTS(Col(column), query))
+        """Build an FTS5 MATCH query for BM25 ranking.
+
+        Uses OR logic with prefix matching for maximum recall.
+        BM25 naturally ranks documents matching more terms higher.
+
+        Args:
+            query: Search query string
+            column: Column to search
+        """
+        # Normalize: split at letter-digit boundaries, quote hyphenated words
+        tokens = []
+        for tok in query.strip().split():
+            # Check if token contains hyphen - if so, quote it to keep as phrase
+            if '-' in tok:
+                # Escape internal quotes and quote the whole hyphenated word
+                escaped = tok.strip('"').replace('"', '""')
+                tokens.append(f'"{escaped}"')
+            else:
+                # Split at letter-digit boundaries for things like FY2025, Q4
+                for sub in ALNUM_SPLIT.split(tok):
+                    sub = sub.strip().strip('"').lower()
+                    if not sub:
+                        continue
+                    # Add prefix wildcard for recall on longer tokens
+                    if len(sub) >= 3 and '"' not in sub and "*" not in sub:
+                        sub = f"{sub}*"
+                    tokens.append(sub)
+
+        if not tokens:
+            tokens = ["*"]
+
+        # Always use OR - BM25 handles relevance ranking
+        fts_query = " OR ".join(tokens)
+
+        self._and(KeywordFTS(Col(column), fts_query))
         self.order_by = []
         return self
 

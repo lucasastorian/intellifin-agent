@@ -1,6 +1,7 @@
 import re
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -19,10 +20,11 @@ class Database:
             raise ValueError("Provide a filesystem path for SQLite (no in-memory DBs).")
         self.schema = schema
         self.base_path = base_path
+        self._lock = threading.RLock()  # Reentrant lock for nested acquisitions
 
         Path(base_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self.conn = sqlite3.connect(self.base_path)
+        self.conn = sqlite3.connect(self.base_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._max_vars = None
 
@@ -51,6 +53,7 @@ class Database:
         self.conn.execute("PRAGMA synchronous = NORMAL;")
 
         self._provision_schema_if_needed()
+        self._ensure_fts_objects()
 
     def close(self):
         """Close the database connection."""
@@ -68,15 +71,26 @@ class Database:
             self.conn.executescript(create_sql)
             self.conn.commit()
 
+    def _ensure_fts_objects(self):
+        """Idempotently create FTS virtual tables and triggers for all tables with fts=True fields."""
+        for table_name, table_cls in self.schema.tables.items():
+            fts_sql = table_cls._generate_fts_sql()
+            if not fts_sql:
+                continue
+            # CREATE VIRTUAL TABLE IF NOT EXISTS and CREATE TRIGGER IF NOT EXISTS are idempotent
+            self.conn.executescript(fts_sql)
+        self.conn.commit()
+
     @contextmanager
     def transaction(self):
         """Context manager for explicit transactions with automatic commit/rollback."""
-        try:
-            yield
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
+        with self._lock:
+            try:
+                yield
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
 
     def table(self, name: str) -> "TableQueryBuilder":
         """Return a query builder bound to a table or view."""
@@ -131,30 +145,31 @@ class Database:
 
     def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
         """Execute SQL with error handling and return rows as dicts."""
-        try:
-            cursor = self.conn.execute(sql, params)
-            if cursor.description:
-                cols = [c[0] for c in cursor.description]
-                rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
-                return rows
-            return []
-        except sqlite3.IntegrityError as e:
-            self.conn.rollback()
-            error_name = getattr(e, "sqlite_errorname", "")
-            msg = str(e)
+        with self._lock:
+            try:
+                cursor = self.conn.execute(sql, params)
+                if cursor.description:
+                    cols = [c[0] for c in cursor.description]
+                    rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
+                    return rows
+                return []
+            except sqlite3.IntegrityError as e:
+                self.conn.rollback()
+                error_name = getattr(e, "sqlite_errorname", "")
+                msg = str(e)
 
-            if error_name == "SQLITE_CONSTRAINT_FOREIGNKEY" or "FOREIGN KEY constraint failed" in msg:
-                raise ForeignKeyError(msg) from e
-            if error_name == "SQLITE_CONSTRAINT_UNIQUE" or "UNIQUE constraint failed" in msg:
-                raise UniqueConstraintError(msg) from e
-            if error_name == "SQLITE_CONSTRAINT_NOTNULL" or "NOT NULL constraint failed" in msg:
-                raise NotNullViolation(msg) from e
-            if error_name == "SQLITE_CONSTRAINT_CHECK" or "CHECK constraint failed" in msg:
-                raise CheckConstraintError(msg) from e
-            raise ConstraintError(msg) from e
-        except sqlite3.Error as e:
-            self.conn.rollback()
-            raise DatabaseError(str(e)) from e
+                if error_name == "SQLITE_CONSTRAINT_FOREIGNKEY" or "FOREIGN KEY constraint failed" in msg:
+                    raise ForeignKeyError(msg) from e
+                if error_name == "SQLITE_CONSTRAINT_UNIQUE" or "UNIQUE constraint failed" in msg:
+                    raise UniqueConstraintError(msg) from e
+                if error_name == "SQLITE_CONSTRAINT_NOTNULL" or "NOT NULL constraint failed" in msg:
+                    raise NotNullViolation(msg) from e
+                if error_name == "SQLITE_CONSTRAINT_CHECK" or "CHECK constraint failed" in msg:
+                    raise CheckConstraintError(msg) from e
+                raise ConstraintError(msg) from e
+            except sqlite3.Error as e:
+                self.conn.rollback()
+                raise DatabaseError(str(e)) from e
 
     @classmethod
     def from_file(cls, path: str, schema: Schema):
@@ -195,7 +210,6 @@ class Database:
 
         if table in self.schema.views:
             vcls = self.schema.views[table]
-            vcls._schema = self.schema
             tmap = vcls.type_map(self.schema)
             out = data.copy()
             for alias, val in list(out.items()):
@@ -233,7 +247,6 @@ class Database:
 
         if table in self.schema.views:
             vcls = self.schema.views[table]
-            vcls._schema = self.schema
             tmap = vcls.type_map(self.schema)
             out = data.copy()
             for alias, fd in tmap.items():

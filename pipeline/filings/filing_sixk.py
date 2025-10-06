@@ -23,4 +23,4 @@ class FilingSixK(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response['data'][0]['id']
+        return response.data[0]['id']

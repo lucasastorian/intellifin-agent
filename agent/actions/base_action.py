@@ -13,7 +13,7 @@ class BaseAction(ABC):
     name: str
     schema: BaseModel
 
-    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2023):
+    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2017):
         self.database = database
         self.edgar_user_agent = edgar_user_agent
         self.start_year = start_year

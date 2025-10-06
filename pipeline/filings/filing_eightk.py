@@ -27,7 +27,7 @@ class FilingEightK(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response['data'][0]['id']
+        return response.data[0]['id']
 
     def _upsert_press_release_pages(self, filing_id: int):
         """Upserts the press release for press releases"""

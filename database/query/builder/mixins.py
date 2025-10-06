@@ -23,18 +23,26 @@ class PredMixin:
 
     def gt(self, field: str, value: Any):
         """field > value"""
+        if value is None:
+            return self
         return self._and(Gt(Col(field), Lit(value)))
 
     def gte(self, field: str, value: Any):
         """field >= value"""
+        if value is None:
+            return self
         return self._and(Ge(Col(field), Lit(value)))
 
     def lt(self, field: str, value: Any):
         """field < value"""
+        if value is None:
+            return self
         return self._and(Lt(Col(field), Lit(value)))
 
     def lte(self, field: str, value: Any):
         """field <= value"""
+        if value is None:
+            return self
         return self._and(Le(Col(field), Lit(value)))
 
     def in_(self, field: str, values: List[Any]):
@@ -54,8 +62,15 @@ class PredMixin:
         return self._and(Ne(Col(field), Lit(None)))
 
     def between(self, field: str, lower: Any, upper: Any):
-        """field BETWEEN lower AND upper"""
-        return self._and(And([Ge(Col(field), Lit(lower)), Le(Col(field), Lit(upper))]))
+        """field BETWEEN lower AND upper (accepts open-ended ranges with None)"""
+        preds = []
+        if lower is not None:
+            preds.append(Ge(Col(field), Lit(lower)))
+        if upper is not None:
+            preds.append(Le(Col(field), Lit(upper)))
+        if not preds:
+            return self
+        return self._and(And(preds) if len(preds) > 1 else preds[0])
 
     def contains(self, field: str, value: Any):
         """JSON array contains value or JSON object has key"""
