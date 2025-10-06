@@ -1,11 +1,12 @@
-from typing import Optional
 from bs4 import BeautifulSoup
 from abc import ABC, abstractmethod
+from typing import Optional, List
 from edgar.entity.filings import EntityFiling
 from edgar.xbrl import XBRL
 
 from database.database import Database
 from pipeline.parsers.parser import Parser
+from pipeline.chunker.markdown_chunker import MarkdownChunker
 from pipeline.parsers.financial_statement import FinancialStatements
 
 
@@ -20,6 +21,8 @@ class BaseFiling(ABC):
         # Convert empty report_date to None (DEF 14A and some other filings don't have report dates)
         self.report_date = filing.report_date if filing.report_date else None
         self.filing_date = filing.filing_date.strftime('%Y-%m-%d')
+
+        self.markdown_chunker = MarkdownChunker()
 
     @abstractmethod
     def upsert(self):
@@ -36,7 +39,7 @@ class BaseFiling(ABC):
         raise NotImplementedError
 
     def _upsert_filing_pages(self, filing_id: int):
-        """Creates a record for the filing pages"""
+        """Creates a record for the filing pages and returns the pages"""
         html_content = self.filing.html()
 
         parser = Parser(content=html_content)
@@ -48,6 +51,8 @@ class BaseFiling(ABC):
             "filing_id": filing_id,
             "company_id": self.company_id
         } for page in pages], on_conflict="filing_id,page").execute()
+
+        return pages
 
     def _upsert_filing_notes(self, filing_id: int):
         """Upserts all the notes associated with the filing"""
@@ -100,3 +105,19 @@ class BaseFiling(ABC):
             return None
 
         return ''.join([str(element) for element in elements])
+
+    def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
+        """Chunks the filing pages and upserts them"""
+        chunks = self.markdown_chunker.split(pages=pages)
+
+        data = [
+            {
+                "page": chunk.page,
+                "content": chunk.content,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            } for chunk in chunks]
+
+        response = self.database.table("filing_chunks").upsert(data).execute()
+
+        return response.data[0]['id']

@@ -14,7 +14,9 @@ from pipeline.filings.filing_twentyf import FilingTwentyF
 
 
 class Company:
-    forms: List[str] = ["10-K", "10-Q", "8-K", "DEF 14A", "20-F", "6-K"]
+    forms: List[str] = ["10-K", "10-Q", "8-K",
+                        "DEF 14A",
+                        "20-F", "6-K"]
 
     def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
                  end_year: int = 2026):

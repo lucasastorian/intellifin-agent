@@ -2,6 +2,11 @@
 from .ir import *
 from typing import List, Tuple
 
+# SQLite max variables per statement (typical default)
+MAX_VARIABLES = 999
+# Chunk IN predicates to stay under limit
+IN_CHUNK_SIZE = 500
+
 
 class SQLGen:
     """Stateful SQL generator with parameter collection."""
@@ -13,6 +18,9 @@ class SQLGen:
 
     def col(self, c: Col, table_alias: str = "t") -> str:
         """Generate column reference."""
+        if not table_alias:
+            # Unqualified column (for UPDATE/DELETE without alias)
+            return self.d.q(c.name)
         return f"{table_alias}.{self.d.q(c.name)}"
 
     def lit(self, v: Any) -> str:
@@ -44,12 +52,32 @@ class SQLGen:
         if isinstance(p, In_):
             if not p.vals:
                 return "1=0"
+
+            # Chunk large IN lists to avoid SQLite variable limit
+            if len(p.vals) > IN_CHUNK_SIZE:
+                chunks = []
+                for i in range(0, len(p.vals), IN_CHUNK_SIZE):
+                    chunk_vals = p.vals[i:i + IN_CHUNK_SIZE]
+                    qs = ", ".join(self.lit(v.value) for v in chunk_vals)
+                    chunks.append(f"{self.col(p.col, table_alias)} IN ({qs})")
+                return "(" + " OR ".join(chunks) + ")"
+
             qs = ", ".join(self.lit(v.value) for v in p.vals)
             return f"{self.col(p.col, table_alias)} IN ({qs})"
 
         if isinstance(p, Nin):
             if not p.vals:
                 return "1=1"
+
+            # Chunk large NOT IN lists to avoid SQLite variable limit
+            if len(p.vals) > IN_CHUNK_SIZE:
+                chunks = []
+                for i in range(0, len(p.vals), IN_CHUNK_SIZE):
+                    chunk_vals = p.vals[i:i + IN_CHUNK_SIZE]
+                    qs = ", ".join(self.lit(v.value) for v in chunk_vals)
+                    chunks.append(f"{self.col(p.col, table_alias)} NOT IN ({qs})")
+                return "(" + " AND ".join(chunks) + ")"
+
             qs = ", ".join(self.lit(v.value) for v in p.vals)
             return f"{self.col(p.col, table_alias)} NOT IN ({qs})"
 
@@ -61,20 +89,38 @@ class SQLGen:
 
         if isinstance(p, ContainsJSON):
             col_ref = self.col(p.col, table_alias)
-            if isinstance(p.vals, list):
-                qs_array = ", ".join(self.lit(v.value) for v in p.vals)
-                qs_object = ", ".join(self.lit(v.value) for v in p.vals)
-            else:
-                qs_array = self.lit(p.vals.value)
-                qs_object = self.lit(p.vals.value)
 
+            # Single value: fast path with direct comparison
+            if not isinstance(p.vals, list):
+                val_param = self.lit(p.vals.value)
+                # For arrays: check if value exists
+                # For objects: check if key exists
+                array_clause = (
+                    f"(json_type({col_ref})='array' AND EXISTS ("
+                    f"SELECT 1 FROM json_each({col_ref}) WHERE value = {val_param}))"
+                )
+                object_clause = (
+                    f"(json_type({col_ref})='object' AND EXISTS ("
+                    f"SELECT 1 FROM json_each({col_ref}) WHERE key = {val_param}))"
+                )
+                return f"({array_clause} OR {object_clause})"
+
+            # Multiple values: use JSON array param to avoid N*M correlated subqueries
+            import json
+            vals_json = json.dumps([v.value for v in p.vals])
+            vals_param = self.lit(vals_json)
+
+            # Use a single EXISTS with json_each on both the column AND the param
+            # Check if ANY value from our param list exists in the column
             array_clause = (
                 f"(json_type({col_ref})='array' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) WHERE value IN ({qs_array})))"
+                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param}) p "
+                f"WHERE c.value = p.value))"
             )
             object_clause = (
                 f"(json_type({col_ref})='object' AND EXISTS ("
-                f"SELECT 1 FROM json_each({col_ref}) WHERE key IN ({qs_object})))"
+                f"SELECT 1 FROM json_each({col_ref}) c, json_each({vals_param}) p "
+                f"WHERE c.key = p.value))"
             )
             return f"({array_clause} OR {object_clause})"
 
@@ -173,14 +219,19 @@ def generate_insert(ir: InsertIR, dialect) -> Tuple[str, List[Any]]:
 
 
 def generate_update(ir: UpdateIR, dialect) -> Tuple[str, List[Any]]:
-    """Generate UPDATE SQL + params."""
+    """Generate UPDATE SQL + params.
+
+    Note: SQLite UPDATE doesn't support table aliases in basic syntax.
+    Use unqualified column names in WHERE clause.
+    """
     g = SQLGen(dialect)
 
     set_clauses = [f"{dialect.q(col)} = {g.lit(val)}" for col, val in ir.assign.items()]
     sql = [f"UPDATE {dialect.q(ir.table)} SET {', '.join(set_clauses)}"]
 
     if ir.where:
-        sql.append("WHERE " + g.pred(ir.where, table_alias=dialect.q(ir.table)))
+        # Don't qualify columns - UPDATE doesn't have table alias
+        sql.append("WHERE " + g.pred(ir.where, table_alias=""))
 
     sql.append("RETURNING *")
 
@@ -188,12 +239,17 @@ def generate_update(ir: UpdateIR, dialect) -> Tuple[str, List[Any]]:
 
 
 def generate_delete(ir: DeleteIR, dialect) -> Tuple[str, List[Any]]:
-    """Generate DELETE SQL + params."""
+    """Generate DELETE SQL + params.
+
+    Note: SQLite DELETE doesn't support table aliases in basic syntax.
+    Use unqualified column names in WHERE clause.
+    """
     g = SQLGen(dialect)
     sql = [f"DELETE FROM {dialect.q(ir.table)}"]
 
     if ir.where:
-        sql.append("WHERE " + g.pred(ir.where, table_alias=dialect.q(ir.table)))
+        # Don't qualify columns - DELETE doesn't have table alias
+        sql.append("WHERE " + g.pred(ir.where, table_alias=""))
 
     sql.append("RETURNING *")
 

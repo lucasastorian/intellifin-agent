@@ -1,5 +1,6 @@
 """UPDATE query builder."""
-from typing import Dict, Any
+import numpy as np
+from typing import Dict, Any, List
 from .mixins import PredMixin
 from ..ir import UpdateIR
 from ..binder import bind_update
@@ -39,4 +40,51 @@ class UpdateBuilder(PredMixin):
             processed.append(row)
 
         self.db.conn.commit()
+
+        # Update vectors for changed fields AFTER commit, BEFORE return
+        self._update_vectors(processed)
+
         return Result(processed)
+
+    def _update_vectors(self, rows: List[Dict[str, Any]]):
+        """Update vectors for any vector-enabled fields that were modified"""
+        if not rows or not self.db.embedder:
+            return
+
+        # Get table class to check for vector fields
+        table_cls = self.schema.get_table(self.table)
+        if not table_cls:
+            return
+
+        # Find vector-enabled fields that were actually updated
+        vector_fields = []
+        for field_name, field in table_cls.get_fields().items():
+            if getattr(field, 'vector', False) and field_name in self.data:
+                vector_fields.append(field_name)
+
+        if not vector_fields:
+            return
+
+        # For each vector field that was updated
+        for field_name in vector_fields:
+            # Collect texts and IDs
+            texts = []
+            ids = []
+            for row in rows:
+                if field_name in row and row[field_name]:
+                    texts.append(row[field_name])
+                    ids.append(row['id'])
+
+            if not texts:
+                continue
+
+            # Tombstone old vectors, add new ones
+            vector_store = self.db.get_or_create_vector_store(self.table, field_name)
+            vector_store.tombstone_batch(ids)
+
+            # Batch embed new content
+            embeddings = self.db.embedder.embed(texts)
+            vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
+
+            # Append new vectors
+            vector_store.add_batch(ids, vectors)

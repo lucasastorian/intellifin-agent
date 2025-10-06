@@ -94,7 +94,7 @@ class FilingNotes(Table):
 
     title = Text(nullable=False)
     filename = Text(nullable=False)
-    content = Text(nullable=False, fts=True)
+    content = Text(nullable=False, fts=True, vector=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -103,6 +103,21 @@ class FilingNotes(Table):
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
     __uniques__ = [("filing_id", "filename")]
+
+
+class FilingChunks(Table):
+    __tablename__ = "filing_chunks"
+
+    id = Serial()
+
+    page = Integer(nullable=False)
+    content = Text(nullable=False, fts=True, vector=True)
+
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
 
 class FilingPages(Table):
@@ -225,6 +240,7 @@ schema.add_table(Filings)
 schema.add_table(FinancialStatements)
 schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
+schema.add_table(FilingChunks)
 schema.add_table(PressReleasePages)
 
 schema.add_view(CompanyFilings)

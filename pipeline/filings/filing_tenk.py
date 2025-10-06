@@ -1,6 +1,6 @@
 import logging
 from edgar.xbrl import XBRL
-from typing import Optional
+from typing import Optional, List
 
 from pipeline.filings.base_filing import BaseFiling
 
@@ -15,9 +15,10 @@ class FilingTenK(BaseFiling):
             logging.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
-        self._upsert_filing_pages(filing_id=filing_id)
+        pages = self._upsert_filing_pages(filing_id=filing_id)
         self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
+        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""
@@ -36,3 +37,19 @@ class FilingTenK(BaseFiling):
         }, on_conflict="accession_number").execute()
 
         return response.data[0]['id']
+
+    # def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
+    #     """Chunks the filing pages and upserts them"""
+    #     chunks = self.markdown_chunker.split(pages=pages)
+    #
+    #     data = [
+    #         {
+    #             "page": chunk.page,
+    #             "content": chunk.content,
+    #             "filing_id": filing_id,
+    #             "company_id": self.company_id
+    #         } for chunk in chunks]
+    #
+    #     response = self.database.table("filing_chunks").upsert(data).execute()
+    #
+    #     return response.data[0]['id']

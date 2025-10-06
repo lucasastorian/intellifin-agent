@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Union, List, Dict, Any
 from .schema.schema import Schema
+from .vector_store import VectorStore
 from .errors import (
     DatabaseError, ConstraintError, ForeignKeyError,
     UniqueConstraintError, NotNullViolation, CheckConstraintError
@@ -21,6 +22,7 @@ class Database:
         self.schema = schema
         self.base_path = base_path
         self._lock = threading.RLock()  # Reentrant lock for nested acquisitions
+        self._closed = False  # Track connection state
 
         Path(base_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,10 +56,28 @@ class Database:
 
         self._provision_schema_if_needed()
         self._ensure_fts_objects()
+        self._init_vector_stores()
+        self._init_embedder()
 
     def close(self):
-        """Close the database connection."""
-        self.conn.close()
+        """Close the database connection in a thread-safe manner.
+
+        Acquires the lock to ensure no queries are in-flight during shutdown.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self.conn.close()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - close connection."""
+        self.close()
+        return False
 
     def _provision_schema_if_needed(self):
         """Automatically create tables if database is empty."""
@@ -81,10 +101,34 @@ class Database:
             self.conn.executescript(fts_sql)
         self.conn.commit()
 
+    def _init_vector_stores(self):
+        """Initialize vector stores registry (created on-demand)"""
+        self.vector_stores = {}
+
+    def _init_embedder(self):
+        """Initialize Voyage embedder (512d, voyage-3.5-lite)"""
+        try:
+            from embeddings.voyage import VoyageEmbeddings
+            self.embedder = VoyageEmbeddings(model="voyage-3.5-lite", dimensions=512)
+        except ImportError:
+            # Embedder is optional - only needed for vector search
+            self.embedder = None
+
+    def get_or_create_vector_store(self, table: str, column: str) -> VectorStore:
+        """Get or create a vector store for a table/column pair"""
+        key = (table, column)
+        if key not in self.vector_stores:
+            vector_dir = Path(self.base_path).parent / 'vectors'
+            store_path = vector_dir / f'{table}__{column}'
+            self.vector_stores[key] = VectorStore(str(store_path), dim=512)
+        return self.vector_stores[key]
+
     @contextmanager
     def transaction(self):
         """Context manager for explicit transactions with automatic commit/rollback."""
         with self._lock:
+            if self._closed:
+                raise DatabaseError("Cannot start transaction on closed database connection")
             try:
                 yield
                 self.conn.commit()
@@ -146,6 +190,8 @@ class Database:
     def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
         """Execute SQL with error handling and return rows as dicts."""
         with self._lock:
+            if self._closed:
+                raise DatabaseError("Cannot execute query on closed database connection")
             try:
                 cursor = self.conn.execute(sql, params)
                 if cursor.description:

@@ -239,14 +239,15 @@ class Table(metaclass=TableMeta):
             base = cls.__tablename__
             fts = f"`{base}__{col}__fts`"
 
-            # VIRTUAL TABLE
+            # VIRTUAL TABLE with prefix indexes and enhanced tokenization
             fts_chunks.append(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts}\n"
                 f"USING fts5(\n"
                 f"  `{col}`,\n"
                 f"  content='{base}',\n"
                 f"  content_rowid='{pk_field}',\n"
-                f"  tokenize='unicode61'\n"
+                f"  tokenize='unicode61 remove_diacritics 2',\n"
+                f"  prefix='2 3 4'\n"
                 f");"
             )
 

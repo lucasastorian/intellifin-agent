@@ -15,9 +15,10 @@ class FilingTenQ(BaseFiling):
             logging.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
-        self._upsert_filing_pages(filing_id=filing_id)
+        pages = self._upsert_filing_pages(filing_id=filing_id)
         self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
+        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""

@@ -60,10 +60,19 @@ class FieldDescriptor:
             sql += " UNIQUE"
         if self.default is not None:
             if isinstance(self.default, str) and self.default.startswith("CURRENT_"):
+                # SQL keyword like CURRENT_TIMESTAMP
                 sql += f" DEFAULT {self.default}"
+            elif isinstance(self.default, (int, float, bool)):
+                # Numeric/boolean literals
+                sql += f" DEFAULT {self.default}"
+            elif isinstance(self.default, str):
+                # String literal - escape single quotes by doubling them
+                escaped = self.default.replace("'", "''")
+                sql += f" DEFAULT '{escaped}'"
             else:
-                sql += f" DEFAULT {self.default}" if isinstance(self.default,
-                                                                (int, float)) else f" DEFAULT '{self.default}'"
+                # Other types - convert to string and escape
+                escaped = str(self.default).replace("'", "''")
+                sql += f" DEFAULT '{escaped}'"
         return sql
 
     def set_context(self, table_name: str, field_name: str, schema: 'Schema') -> None:
@@ -141,9 +150,10 @@ class Serial(FieldDescriptor):
 
 
 class Text(FieldDescriptor):
-    def __init__(self, index: bool = False, fts: bool = False, **kwargs):
+    def __init__(self, index: bool = False, fts: bool = False, vector: bool = False, **kwargs):
         super().__init__("TEXT", index=index, **kwargs)
         self.fts = fts
+        self.vector = vector
 
     def _validate_type(self, value: Any) -> str:
         """Validate and convert value to string"""
@@ -153,6 +163,7 @@ class Text(FieldDescriptor):
         """Serialize field descriptor to dictionary"""
         data = super().to_dict()
         data['fts'] = self.fts
+        data['vector'] = self.vector
         return data
 
     @classmethod
@@ -161,6 +172,7 @@ class Text(FieldDescriptor):
         return cls(
             index=data['index'],
             fts=data.get('fts', False),
+            vector=data.get('vector', False),
             primary_key=data['primary_key'],
             nullable=data['nullable'],
             default=data['default'],

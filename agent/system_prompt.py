@@ -19,6 +19,8 @@ class SystemPrompt:
         
         Do not respond to the user until you have an exact answer. 
         
+        If you can't figure out the answer after 5-10 turns, hypothesize what type of search / analysis tools might improve your search (ex. semantic search, a dedicated sub-curation agent, etc. )
+        
         Today is {self.today()}
     """
 

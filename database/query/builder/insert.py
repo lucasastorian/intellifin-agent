@@ -1,4 +1,5 @@
 """INSERT query builder."""
+import numpy as np
 from typing import Dict, List, Union, Any
 from ..ir import InsertIR
 from ..sqlgen import generate_insert
@@ -54,4 +55,47 @@ class InsertBuilder:
                         row = self.db._deserialize_json_fields(self.table, row)
                         all_results.append(row)
 
+        # Embed and store vectors AFTER SQLite insert, BEFORE return
+        self._embed_vectors(all_results)
+
         return Result(all_results)
+
+    def _embed_vectors(self, rows: List[Dict[str, Any]]):
+        """Embed and store vectors for vector-enabled fields"""
+        if not rows or not self.db.embedder:
+            return
+
+        # Get table class to check for vector fields
+        table_cls = self.schema.get_table(self.table)
+        if not table_cls:
+            return
+
+        # Find vector-enabled text fields
+        vector_fields = []
+        for field_name, field in table_cls.get_fields().items():
+            if getattr(field, 'vector', False):
+                vector_fields.append(field_name)
+
+        if not vector_fields:
+            return
+
+        # Embed each vector field
+        for field_name in vector_fields:
+            # Collect texts and IDs
+            texts = []
+            ids = []
+            for row in rows:
+                if field_name in row and row[field_name]:
+                    texts.append(row[field_name])
+                    ids.append(row['id'])
+
+            if not texts:
+                continue
+
+            # Batch embed
+            embeddings = self.db.embedder.embed(texts)
+            vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
+
+            # Store in vector store
+            vector_store = self.db.get_or_create_vector_store(self.table, field_name)
+            vector_store.add_batch(ids, vectors)

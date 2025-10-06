@@ -1,6 +1,7 @@
 """SELECT query builder."""
 import re
-from typing import Optional
+import numpy as np
+from typing import Optional, List
 from .mixins import PredMixin, SelectMixin
 from ..ir import SelectIR, KeywordFTS, Col
 from ..binder import bind_select
@@ -63,6 +64,64 @@ class SelectBuilder(PredMixin, SelectMixin):
 
         self._and(KeywordFTS(Col(column), fts_query))
         self.order_by = []
+        return self
+
+    def vector_search(self, query: str, column: str, topk: int = 50, embedder=None):
+        """Vector similarity search using brute-force cosine similarity.
+
+        Args:
+            query: Query text to embed and search
+            column: Column name (must have associated vector store)
+            topk: Number of results to return
+            embedder: Embedder instance (if None, uses db.embedder)
+
+        Returns:
+            self (for chaining .select().execute())
+        """
+        if embedder is None:
+            embedder = getattr(self.db, 'embedder', None)
+            if embedder is None:
+                raise ValueError("No embedder available. Pass embedder argument or set db.embedder")
+
+        # Get or create vector store for this table/column
+        vector_store = self.db.get_or_create_vector_store(self.table, column)
+
+        # Embed query
+        query_vec = np.array(embedder.query_vector(query), dtype=np.float32)
+
+        # Collect any existing WHERE clause IDs for filtering
+        filter_ids = None
+        if self._pred is not None:
+            # Execute current predicates to get candidate IDs
+            temp_ir = SelectIR(
+                table=self.table,
+                columns=["id"],
+                where=self._pred,
+                order=[],
+                limit=None,
+            )
+            from ..binder import bind_select
+            from ..planner import plan_select
+            from ..sqlgen import generate_select
+            bound = bind_select(temp_ir, self.schema)
+            planned, _ = plan_select(bound, self.schema, self.dialect)
+            sql, params = generate_select(planned, self.dialect)
+            rows = self.db._exec(sql, params)
+            filter_ids = [row['id'] for row in rows]
+
+        # Search vector store
+        ids, scores = vector_store.search(query_vec, topk=topk, filter_ids=filter_ids)
+
+        # Filter by returned IDs
+        if len(ids) == 0:
+            # No results - add impossible predicate
+            self._pred = None
+            self.in_("id", [])
+        else:
+            # Reset predicate and filter by vector search results
+            self._pred = None
+            self.in_("id", ids.tolist())
+
         return self
 
     def execute(self):

@@ -11,8 +11,10 @@ class FilingEightK(BaseFiling):
         xbrl = self.filing.xbrl()
 
         filing_id = self._upsert_filing(xbrl=xbrl)
-        self._upsert_filing_pages(filing_id=filing_id)
+        pages = self._upsert_filing_pages(filing_id=filing_id)
         self._upsert_press_release_pages(filing_id=filing_id)
+
+        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
