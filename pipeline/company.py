@@ -46,7 +46,7 @@ class Company:
 
     def exists(self) -> bool:
         """Returns True if the company exists in the DB"""
-        return len(self.database.table("companies").contains("symbols", self.symbol).limit(1).execute()) > 0
+        return len(self.database.table("companies").select("*").contains("symbols", self.symbol).limit(1).execute()) > 0
 
     def _upsert_filings(self, company_id: int):
         """Upserts ALL the filings for that company within a given date range"""

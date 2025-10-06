@@ -44,7 +44,7 @@ class Agent:
 
     async def step(self, actions: List[BaseAction]):
         """Executes a single step in the agent loop"""
-        completion = await self.client.stream(messages=self.messages)
+        completion = await self.client.stream(messages=self.messages, actions=actions)
         self.messages.append(completion)
         terminate = await self._call_actions(completion=completion, actions=actions)
 

@@ -36,7 +36,10 @@ class FilterMixin:
             field: Name of the numeric field to filter on
             value: Minimum value (exclusive)
         """
-        self.mongo_filters[field] = {"$gt": value}
+        if field in self.mongo_filters and isinstance(self.mongo_filters[field], dict):
+            self.mongo_filters[field]["$gt"] = value
+        else:
+            self.mongo_filters[field] = {"$gt": value}
         return self
 
     def gte(self, field: str, value: Union[int, float]) -> Self:
@@ -46,7 +49,10 @@ class FilterMixin:
             field: Name of the numeric field to filter on
             value: Minimum value (inclusive)
         """
-        self.mongo_filters[field] = {"$gte": value}
+        if field in self.mongo_filters and isinstance(self.mongo_filters[field], dict):
+            self.mongo_filters[field]["$gte"] = value
+        else:
+            self.mongo_filters[field] = {"$gte": value}
         return self
 
     def lt(self, field: str, value: Union[int, float]) -> Self:
@@ -56,7 +62,10 @@ class FilterMixin:
             field: Name of the numeric field to filter on
             value: Maximum value (exclusive)
         """
-        self.mongo_filters[field] = {"$lt": value}
+        if field in self.mongo_filters and isinstance(self.mongo_filters[field], dict):
+            self.mongo_filters[field]["$lt"] = value
+        else:
+            self.mongo_filters[field] = {"$lt": value}
         return self
 
     def lte(self, field: str, value: Union[int, float]) -> Self:
@@ -66,7 +75,10 @@ class FilterMixin:
             field: Name of the numeric field to filter on
             value: Maximum value (inclusive)
         """
-        self.mongo_filters[field] = {"$lte": value}
+        if field in self.mongo_filters and isinstance(self.mongo_filters[field], dict):
+            self.mongo_filters[field]["$lte"] = value
+        else:
+            self.mongo_filters[field] = {"$lte": value}
         return self
 
     def in_(self, field: str, values: List[Any]) -> Self:

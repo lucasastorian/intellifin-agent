@@ -1,3 +1,5 @@
+import os
+import sys
 from typing import List, Set
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
@@ -8,7 +10,6 @@ from agent.message import Action
 
 
 class BaseAction(ABC):
-
     name: str
     schema: BaseModel
 
@@ -29,9 +30,16 @@ class BaseAction(ABC):
         for symbol in symbols:
             company = Company(symbol=symbol, database=self.database, edgar_user_agent=self.edgar_user_agent,
                               start_year=self.start_year)
-            sync_successful = company.sync()
-            if not sync_successful:
-                not_found.append(symbol)
+
+            # Only show sync message if not already cached
+            if not company.exists():
+                print(f"  {self._c('⟳', 'yellow')} Syncing {symbol} from EDGAR...", end="", flush=True)
+                sync_successful = company.sync()
+                if sync_successful:
+                    print(f" {self._c('✓', 'green')}", flush=True)
+                else:
+                    print(f" {self._c('✗', 'red')} Not found", flush=True)
+                    not_found.append(symbol)
 
         return not_found
 
@@ -44,3 +52,53 @@ class BaseAction(ABC):
             if f in {"10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"}:
                 expanded.add(f + "/A")
         return sorted(expanded)
+
+    @property
+    def _tty(self) -> bool:
+        try:
+            return sys.stdout.isatty() and (os.getenv("TERM") not in (None, "dumb"))
+        except Exception:
+            return False
+
+    def _c(self, text: str, color: str) -> str:
+        if not self._tty:
+            return text
+        colors = {
+            "cyan": "\033[36m", "green": "\033[32m",
+            "yellow": "\033[33m", "magenta": "\033[35m",
+            "red": "\033[31m", "dim": "\033[2m",
+            "reset": "\033[0m"
+        }
+        return f"{colors.get(color, '')}{text}{colors['reset']}"
+
+    def log_start(self, action: str, params: str = ""):
+        """Log action start with name and parameters"""
+        print(f"\n{self._c(action, 'cyan')}", flush=True)
+        if params:
+            print(f"  {self._c('→', 'dim')} {params}", flush=True)
+
+    def log_done(self, result: str = ""):
+        """Log successful completion with result summary"""
+        print(f"  {self._c('✓', 'green')} {result}", flush=True)
+
+    def log_error(self, error: str = ""):
+        """Log error with message"""
+        print(f"  {self._c('✗', 'red')} {error}", flush=True)
+
+    @property
+    def openai_schema(self) -> dict:
+        """Converts the schema to an OpenAI compatible tool call format"""
+        json_schema = self.schema.model_json_schema(mode="serialization")
+
+        return {
+            "type": "function",
+            "function": {
+                "name": self.schema.__name__,
+                "description": json_schema['description'],
+                "parameters": {
+                    "type": "object",
+                    "properties": json_schema['properties'],
+                    "required": json_schema.get('required', [])
+                }
+            }
+        }

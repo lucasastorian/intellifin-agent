@@ -21,6 +21,7 @@ class ReadFiling(BaseModel):
 
 
 class ReadFilingAction(BaseAction):
+
     name: str = "ReadFiling"
     schema = ReadFiling
     max_pages: int = 20
@@ -30,7 +31,11 @@ class ReadFilingAction(BaseAction):
             args = self.validate(action)
 
         except RuntimeError as e:
-            return Message(role="tool", status="completed", content=str(e), error=True)
+            self.log_start("ReadFiling")
+            self.log_error(f"Validation failed: {e}")
+            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+
+        self.log_start("ReadFiling", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}")
 
         filing = (
             self.database
@@ -42,8 +47,9 @@ class ReadFilingAction(BaseAction):
         )
 
         if not filing:
+            self.log_error(f"Filing #{args.filing_id} not found")
             return Message(role="tool", status="completed",
-                           content=f"Filing id {args.filing_id} not found.", error=True)
+                           content=f"Filing id {args.filing_id} not found.", error=True, action_id=action.id)
         filing = filing[0]
 
         company = (
@@ -66,17 +72,19 @@ class ReadFilingAction(BaseAction):
             .execute()
         )
         if not max_row:
+            self.log_error(f"No pages stored for filing #{args.filing_id}")
             return Message(role="tool", status="completed",
-                           content=f"No pages stored for filing {args.filing_id}.", error=True)
+                           content=f"No pages stored for filing {args.filing_id}.", error=True, action_id=action.id)
         max_page = max_row[0]["page"]
 
         start = args.start_page
         end = min(args.end_page, max_page)
 
         if start > max_page:
+            self.log_error(f"Page {start} exceeds max page {max_page}")
             return Message(role="tool", status="completed",
                            content=f"Start page {start} exceeds last page {max_page} for filing {args.filing_id}.",
-                           error=True)
+                           error=True, action_id=action.id)
 
         pages = (
             self.database
@@ -89,18 +97,30 @@ class ReadFilingAction(BaseAction):
             .execute()
         )
         if not pages:
+            self.log_error(f"No pages in range {start}–{end}")
             return Message(role="tool", status="completed",
                            content=f"No pages found for filing {args.filing_id} in range {start}-{end}.",
-                           error=True)
+                           error=True, action_id=action.id)
 
         header = self._format_header(company, filing, start, end, max_page)
         body = self._join_pages_to_md(pages)
 
         output = header + "\n\n" + body
+        truncated = False
         if len(output) > 200_000:
             output = header + "\n\n" + body[:200_000] + "\n\n[truncated]"
+            truncated = True
 
-        return Message(role="user", status="completed", content=output)
+        # Build result summary
+        company_name = company.get('name', 'Unknown')
+        form = filing.get('form', '?')
+        summary = f"Retrieved {len(pages)} pages: {company_name} {form}"
+        if truncated:
+            summary += " (truncated)"
+
+        self.log_done(summary)
+
+        return Message(role="tool", status="completed", content=output, action_id=action.id)
 
     def validate(self, action: Action) -> ReadFiling:
         try:

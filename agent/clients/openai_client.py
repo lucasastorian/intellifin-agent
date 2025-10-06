@@ -4,12 +4,13 @@ from typing import Literal, List
 from openai._streaming import AsyncStream
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 
+from agent.actions import BaseAction
 from agent.message import Message, Action
 
 
 class OpenAIClient:
 
-    def __init__(self, model: str = "gpt-5", temperate: int = 1, provider: Literal['OpenAI'] = 'OpenAI'):
+    def __init__(self, model: str = "gpt-5-mini", temperate: int = 1, provider: Literal['OpenAI'] = 'OpenAI'):
         self.model = model
         self.temperature = temperate
         self.provider = provider
@@ -18,7 +19,7 @@ class OpenAIClient:
 
         self.tool_call_arguments = ""
 
-    async def stream(self, messages: List[Message]):
+    async def stream(self, messages: List[Message], actions: List[BaseAction]):
         """Streams a completion with the given messages"""
         messages = [message.format() for message in messages]
 
@@ -26,6 +27,7 @@ class OpenAIClient:
             "model": self.model,
             "temperature": self.temperature,
             "messages": messages,
+            "tools": [action.openai_schema for action in actions],
             "stream": True
         }
 
@@ -41,6 +43,7 @@ class OpenAIClient:
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     completion.content += content
+                    print(content, sep="", end="")
 
                 if json_chunk := chunk.choices[0].delta.tool_calls:
                     tool_call_chunk = json_chunk[0]
@@ -56,6 +59,10 @@ class OpenAIClient:
                 completion.completion_tokens = chunk.usage.completion_tokens
 
         completion.status = "completed"
+
+        # Add newline after streaming completes
+        if completion.content:
+            print()
 
         return completion
 

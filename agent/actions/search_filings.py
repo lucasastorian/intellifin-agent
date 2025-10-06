@@ -69,24 +69,33 @@ class SearchFilings(BaseModel):
 
 
 class SearchFilingsAction(BaseAction):
-
     name: str = 'SearchFilings'
-    schema: SearchFilings
+    schema = SearchFilings
 
     async def call(self, action: Action):
         """Calls the search filings actions and returns a MD table of """
         try:
             args = self.validate(action)
         except RuntimeError as e:
-            return Message(role="tool", status="completed", content=str(e), error=True)
+            self.log_start("SearchFilings")
+            self.log_error(f"Validation failed: {e}")
+            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+
+        params = f"{', '.join(args.symbols)} ({', '.join(args.forms)}), {args.start_date} → {args.end_date or ''}"
+        if args.include_items:
+            params += f", items={','.join(args.include_items)}"
+
+        self.log_start("SearchFilings", params)
 
         not_found = self.sync_symbols(symbols=args.symbols)
         if not_found:
+            self.log_error(f"Symbols not found: {', '.join(sorted(not_found))}")
             return Message(
                 role="tool",
                 status="completed",
                 content=f"Could not find the following symbols on EDGAR: {sorted(not_found)}",
                 error=True,
+                action_id=action.id
             )
 
         companies_rows = (
@@ -119,14 +128,26 @@ class SearchFilingsAction(BaseAction):
 
         filings = qb.order("filing_date", desc=True).limit(50).execute()
         if not filings:
-            return Message(role="tool", status="completed", content="No filings in the requested range.")
+            self.log_done("No filings found")
+            return Message(role="tool", status="completed", content="No filings in the requested range.",
+                           action_id=action.id)
 
         content = self._format_filings_to_md(filings=filings, company_by_id=company_by_id)
 
+        # Build result summary
+        companies = {company_by_id[f['company_id']]['name'] for f in filings if f.get('company_id') in company_by_id}
+        forms = {f['form'] for f in filings}
+        summary = f"Found {len(filings)} filings: {', '.join(sorted(forms))}"
+        if len(companies) <= 3:
+            summary += f" ({', '.join(sorted(companies))})"
+
+        self.log_done(summary)
+
         return Message(
-            role="user",
+            role="tool",
             status="completed",
-            content=content
+            content=content,
+            action_id=action.id
         )
 
     def validate(self, action: Action) -> SearchFilings:
@@ -152,8 +173,8 @@ class SearchFilingsAction(BaseAction):
                 "company": c['name'],
                 "symbols": fmt_items(c['symbols']),
                 "exchanges": fmt_items(c['exchanges']),
-                "form": c['form'],
-                "items": c['items'],
+                "form": f['form'],
+                "items": f['items'],
                 "press_release": "X" if f['press_release'] else "",
                 "report_date": f['report_date'],
                 "filing_date": f['filing_date'],
@@ -169,7 +190,6 @@ class SearchFilingsAction(BaseAction):
             "id", "company", "symbols", "exchanges", "form", "items",
             "press_release", "report_date", "filing_date",
             "fiscal_period", "fiscal_year", "accession_no",
-
         ])
 
         df = df.sort_values(by="filing_date", ascending=False, kind="stable")
