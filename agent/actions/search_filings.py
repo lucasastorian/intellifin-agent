@@ -169,6 +169,7 @@ class SearchFilingsAction(BaseAction):
             "id", "company", "symbols", "exchanges", "form", "items",
             "press_release", "report_date", "filing_date",
             "fiscal_period", "fiscal_year", "accession_no",
+
         ])
 
         df = df.sort_values(by="filing_date", ascending=False, kind="stable")

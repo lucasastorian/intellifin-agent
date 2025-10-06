@@ -7,6 +7,7 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.actions.search_filings import SearchFilingsAction
+from agent.actions.read_filing import ReadFilingAction
 
 
 class Agent:
@@ -25,10 +26,12 @@ class Agent:
     async def run(self, query: str):
         """Runs the assistant with the given query"""
         self.messages.append(Message(role="developer", status="completed", content=SystemPrompt().format()))
-        self.messages.append(Message(role="user",  status="completed", content=query))
+        self.messages.append(Message(role="user", status="completed", content=query))
 
         actions = [SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
-                                       start_year=self.start_year)]
+                                       start_year=self.start_year),
+                   ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent,
+                                    start_year=self.start_year)]
 
         while self.num_iter < self.max_iter:
             terminate = await self.step(actions=actions)

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import Literal, List
 
@@ -12,7 +13,6 @@ class Action:
 
 @dataclass
 class Message:
-
     role: Literal['developer', 'user', 'assistant', 'tool']
     status: Literal['in_progress', 'completed', 'failed']
     content: str
@@ -27,4 +27,14 @@ class Message:
 
     def format(self):
         """Formats the message for the OpenAI Client"""
+        if self.role == "tool":
+            return {"role": self.role, "content": self.content, "tool_call_id": self.action_id}
+
+        elif self.role == "assistant":
+            tool_calls = [{"id": action.id, 'type': 'function',
+                           "function": {"name": action.name, "arguments": json.dumps(action.body)}} for action in
+                          self.actions]
+
+            return {"role": self.role, "content": self.content, "tool_calls": tool_calls}
+
         return {"role": self.role, "content": self.content}
