@@ -64,22 +64,15 @@ class FilingTenQ(BaseFiling):
             if exhibit_prefix not in self.included_exhibits:
                 continue
 
-            # Only process HTML documents
             if not document.is_html():
                 continue
 
-            # Parse HTML content to pages
-            try:
-                parser = Parser(content=document.content)
-                pages = parser.get_pages()
-            except Exception:
-                # Skip attachments that fail to parse
-                continue
+            parser = Parser(content=document.content)
+            pages = parser.get_pages()
 
             if not pages:
                 continue
 
-            # Upsert attachment metadata
             attachment_response = self.database.table("filing_attachments").upsert({
                 "exhibit_number": exhibit_number,
                 "filename": document.document or f"ex-{exhibit_number}",
@@ -94,7 +87,6 @@ class FilingTenQ(BaseFiling):
 
             attachment_id = attachment_response.data[0]['id']
 
-            # Upsert attachment pages
             self.database.table("filing_attachment_pages").upsert([{
                 "page": page['page'],
                 "content": page['content'],
@@ -103,5 +95,4 @@ class FilingTenQ(BaseFiling):
                 "company_id": self.company_id
             } for page in pages], on_conflict="attachment_id,page").execute()
 
-            # Chunk attachment
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
+            # self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)

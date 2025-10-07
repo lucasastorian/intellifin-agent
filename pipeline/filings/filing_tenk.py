@@ -69,12 +69,8 @@ class FilingTenK(BaseFiling):
                 continue
 
             # Parse HTML content to pages
-            try:
-                parser = Parser(content=document.content)
-                pages = parser.get_pages()
-            except Exception:
-                # Skip attachments that fail to parse
-                continue
+            parser = Parser(content=document.content)
+            pages = parser.get_pages()
 
             if not pages:
                 continue
@@ -103,5 +99,4 @@ class FilingTenK(BaseFiling):
                 "company_id": self.company_id
             } for page in pages], on_conflict="attachment_id,page").execute()
 
-            # Chunk attachment
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
+            # self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)

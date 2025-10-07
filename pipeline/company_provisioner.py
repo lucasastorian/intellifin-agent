@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Optional
 from database.database import Database
+from edgar import Company as EdgarCompany, set_identity
 
 
 class CompanyProvisioner:
@@ -47,11 +48,16 @@ class CompanyProvisioner:
             reader = csv.DictReader(f)
             for row in reader:
                 symbol = row['Symbol'].strip().upper()
+                # Parse delisted field (case-insensitive, handles True/true/TRUE)
+                delisted_str = row.get('Delisted', 'False').strip().lower()
+                delisted = delisted_str in ('true', '1', 'yes')
+
                 symbol_map[symbol] = {
                     'sector': row.get('Sector', '').strip() or None,
                     'industry': row.get('Industry', '').strip() or None,
                     'market_cap': self._parse_market_cap(row.get('Market Cap', '')),
                     'country': row.get('Country', '').strip() or None,
+                    'delisted': delisted,
                 }
 
         return symbol_map
@@ -80,13 +86,17 @@ class CompanyProvisioner:
     def _merge_data(self, csv_data: Dict[str, Dict], sec_data: List[Dict]) -> List[Dict]:
         # Group SEC records by CIK to aggregate all tickers for the same company
         cik_map = {}
+        processed_tickers = set()
 
+        # First pass: Process all SEC records and merge with CSV data
         for sec_record in sec_data:
             ticker = sec_record['ticker']
             csv_record = csv_data.get(ticker)
 
             if not csv_record:
                 continue
+
+            processed_tickers.add(ticker)
 
             cik = sec_record['cik']
             if cik not in cik_map:
@@ -100,6 +110,7 @@ class CompanyProvisioner:
                     'industry': csv_record.get('industry'),
                     'market_cap': csv_record.get('market_cap'),
                     'country': csv_record.get('country'),
+                    'delisted': csv_record.get('delisted', False),
                     'fiscal_year_end': None,
                     'synced': False,
                 }
@@ -109,6 +120,37 @@ class CompanyProvisioner:
                 cik_map[cik]['symbols'].append(ticker)
             if sec_record['exchange'] not in cik_map[cik]['exchanges']:
                 cik_map[cik]['exchanges'].append(sec_record['exchange'])
+
+        # Second pass: Add CSV-only entries (delisted companies not in SEC data)
+        # Fetch these individually from EDGAR using EdgarCompany
+        for ticker, csv_record in csv_data.items():
+            if ticker in processed_tickers:
+                continue
+
+            # Try to fetch company info from EDGAR for delisted companies
+            try:
+                set_identity(self.edgar_user_agent)
+                edgar_company = EdgarCompany(ticker)
+                cik = edgar_company.cik
+                name = edgar_company.name if hasattr(edgar_company, 'name') else ticker
+
+                cik_map[cik] = {
+                    'name': name,
+                    'symbols': [ticker],
+                    'exchanges': [],
+                    'cik': cik,
+                    'sic': None,
+                    'sector': csv_record.get('sector'),
+                    'industry': csv_record.get('industry'),
+                    'market_cap': csv_record.get('market_cap'),
+                    'country': csv_record.get('country'),
+                    'delisted': csv_record.get('delisted', False),
+                    'fiscal_year_end': None,
+                    'synced': False,
+                }
+            except Exception:
+                # Skip companies that can't be found on EDGAR
+                continue
 
         return list(cik_map.values())
 

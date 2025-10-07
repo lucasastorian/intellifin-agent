@@ -30,25 +30,30 @@ class Company:
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
     def sync(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-             end_date: Optional[str] = None) -> bool:
+             end_date: Optional[str] = None) -> int:
         """Sync filings for this company
 
         Args:
             forms: List of forms to sync (e.g., ['10-K', '10-Q']). Defaults to all forms.
             start_date: Filter filings by report_date >= this date (ISO format 'YYYY-MM-DD')
             end_date: Filter filings by report_date <= this date (ISO format 'YYYY-MM-DD')
+
+        Returns:
+            Number of filings actually synced (0 if company not found or all already synced)
         """
         if self.company.not_found:
-            return False
+            return 0
 
         return self.upsert(forms=forms, start_date=start_date, end_date=end_date)
 
     def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-               end_date: Optional[str] = None) -> bool:
+               end_date: Optional[str] = None) -> int:
         company_id = self._get_or_create_company_id()
-        self._upsert_filings(company_id=company_id, forms=forms, start_date=start_date, end_date=end_date)
+        if company_id is None:
+            return 0  # Company not found in provisioned data
+        synced_count = self._upsert_filings(company_id=company_id, forms=forms, start_date=start_date, end_date=end_date)
         self.on_sync_complete(company_id=company_id)
-        return True
+        return synced_count
 
     def on_sync_complete(self, company_id: int):
         update_data = {"synced": True}
@@ -60,7 +65,7 @@ class Company:
         self.database.table("companies").update(update_data).eq("id", company_id).execute()
 
     def _upsert_filings(self, company_id: int, forms: Optional[List[str]] = None,
-                        start_date: Optional[str] = None, end_date: Optional[str] = None):
+                        start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
         filings = self._load_filings(forms=forms)
 
         # Filter filings by date range if specified
@@ -70,7 +75,7 @@ class Company:
         def upsert_filing(filing: EntityFiling):
             # Check if filing is already synced
             if self._is_filing_synced(filing.accession_number):
-                return filing.form
+                return None  # Already synced, don't count
 
             parser = self._get_filing_parser(filing=filing, company_id=company_id)
             parser.upsert()
@@ -78,19 +83,24 @@ class Company:
             # Mark filing as synced
             self._mark_filing_synced(filing.accession_number)
 
-            return filing.form
+            return filing.form  # Return form to indicate it was synced
 
+        synced_count = 0
         with ThreadPoolExecutor(max_workers=9) as executor:
             futures = {executor.submit(upsert_filing, filing): filing for filing in filings}
 
             for future in as_completed(futures):
-                future.result()
+                result = future.result()
+                if result is not None:  # Was actually synced
+                    synced_count += 1
 
-    def _get_or_create_company_id(self) -> int:
+        return synced_count
+
+    def _get_or_create_company_id(self) -> Optional[int]:
         response = self.database.table("companies").select("id").contains("symbols", self.symbol).limit(1).execute()
 
         if not response.data:
-            raise ValueError(f"Company with Symbol {self.symbol} not found. Ensure companies are provisioned.")
+            return None  # Company not found in provisioned data
 
         return response.data[0]['id']
 
@@ -101,24 +111,27 @@ class Company:
 
     def _filter_filings_by_date(self, filings: EntityFilings, start_date: Optional[str] = None,
                                 end_date: Optional[str] = None) -> List[EntityFiling]:
-        """Filter filings by report_date range"""
+        """Filter filings by report_date range (fallback to filing_date if report_date missing)"""
         filtered = []
         start = date.fromisoformat(start_date) if start_date else None
         end = date.fromisoformat(end_date) if end_date else None
 
         for filing in filings:
-            if not filing.report_date:
-                raise ValueError(f"Filing {filing.accession_number} ({filing.form}) is missing report_date - cannot filter by date")
+            # NOTE: Some filings (e.g., DEF 14A proxy statements) don't have report_date.
+            # In those cases, fallback to filing_date for date filtering.
+            filter_date = filing.report_date or filing.filing_date
+
+            if not filter_date:
+                # Skip filings with neither date
+                continue
 
             # Convert to date object if it's a string
-            if isinstance(filing.report_date, str):
-                filing_report_date = date.fromisoformat(filing.report_date)
-            else:
-                filing_report_date = filing.report_date
+            if isinstance(filter_date, str):
+                filter_date = date.fromisoformat(filter_date)
 
-            if start and filing_report_date < start:
+            if start and filter_date < start:
                 continue
-            if end and filing_report_date > end:
+            if end and filter_date > end:
                 continue
 
             filtered.append(filing)

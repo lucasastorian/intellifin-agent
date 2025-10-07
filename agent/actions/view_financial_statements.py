@@ -245,13 +245,13 @@ class ViewFinancialStatementsAction(BaseAction):
         try:
             num = float(val)
             if abs(num) >= 1_000_000_000:
-                return f"${num / 1_000_000_000:.2f}B"
+                return f"${num / 1_000_000_000:.3f}B"
             elif abs(num) >= 1_000_000:
-                return f"${num / 1_000_000:.2f}M"
+                return f"${num / 1_000_000:.3f}M"
             elif abs(num) >= 1_000:
-                return f"${num / 1_000:.2f}K"
+                return f"${num / 1_000:.3f}K"
             else:
-                return f"${num:.2f}"
+                return f"${num:.3f}"
         except (ValueError, TypeError):
             return str(val)
 

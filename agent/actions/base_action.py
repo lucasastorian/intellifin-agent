@@ -50,12 +50,17 @@ class BaseAction(ABC):
                     parts.append(f"({date_range})")
                 sync_desc += f" [{' '.join(parts)}]"
 
-            print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR...", end="", flush=True)
-            sync_successful = company.sync(forms=forms, start_date=start_date, end_date=end_date)
-            if sync_successful:
-                print(f" {self._c('✓', 'green')}", flush=True)
+            synced_count = company.sync(forms=forms, start_date=start_date, end_date=end_date)
+
+            # Only show sync message if filings were actually synced
+            if synced_count > 0:
+                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}", flush=True)
+            elif synced_count == 0 and not company.company.not_found:
+                # Company found but nothing to sync (all already synced)
+                pass  # No message
             else:
-                print(f" {self._c('✗', 'red')} Not found", flush=True)
+                # Company not found
+                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found", flush=True)
                 not_found.append(symbol)
 
         return not_found

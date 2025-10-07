@@ -41,10 +41,10 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''Summarize the key terms of the Series D mandatory convertible preferred stock (size of offering, closing date, price, liquidation preference, dividend rights, conversion terms, voting rights, purpose) that KKR & Co. (NYSE:KKR) offered in March 2025. ''')
+                        default='''List the Operating KPIs Spirit Airlines (NYSE: SAVE) tracked in FY 2024. Provide the KPI and FY 2024 Total?''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
-    parser.add_argument('--max-iter', type=int, default=10, help='Max iterations (default: 10)')
+    parser.add_argument('--max-iter', type=int, default=15, help='Max iterations (default: 15)')
 
     args = parser.parse_args()
 

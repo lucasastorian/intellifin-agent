@@ -39,7 +39,7 @@ class ListCompaniesAction(BaseAction):
         result = (
             self.database
             .table("companies")
-            .select("id,name,symbols,exchanges,industry,sector,market_cap")
+            .select("id,name,symbols,exchanges,industry,sector,market_cap,delisted")
             .execute()
         )
 
@@ -101,8 +101,9 @@ class ListCompaniesAction(BaseAction):
                 "exchanges": fmt_items(c['exchanges']),
                 "sector": c.get('sector') or '-',
                 "industry": c.get('industry') or '-',
-                "market_cap": fmt_market_cap(c.get('market_cap'))
+                "market_cap": fmt_market_cap(c.get('market_cap')),
+                "delisted": "Yes" if c.get('delisted') else "No"
             })
 
-        df = pd.DataFrame(rows, columns=["name", "symbols", "exchanges", "sector", "industry", "market_cap"])
+        df = pd.DataFrame(rows, columns=["name", "symbols", "exchanges", "sector", "industry", "market_cap", "delisted"])
         return df.to_markdown(index=False)

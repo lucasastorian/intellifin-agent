@@ -32,14 +32,15 @@ class UpdateBuilder(PredMixin):
         ir = UpdateIR(table=self.table, assign=serialized_data, where=self._pred)
         bound = bind_update(ir, self.schema)
         sql, params = generate_update(bound, self.dialect)
-        rows = self.db._exec(sql, params)
+
+        with self.db._lock:
+            rows = self.db._exec_unsafe(sql, params)
+            self.db.conn.commit()
 
         processed = []
         for row in rows:
             row = self.db._deserialize_json_fields(self.table, row)
             processed.append(row)
-
-        self.db.conn.commit()
 
         # Update vectors for changed fields AFTER commit, BEFORE return
         self._update_vectors(processed)

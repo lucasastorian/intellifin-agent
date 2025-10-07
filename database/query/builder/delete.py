@@ -26,9 +26,10 @@ class DeleteBuilder(PredMixin):
         ir = DeleteIR(table=self.table, where=self._pred)
         bound = bind_delete(ir, self.schema)
         sql, params = generate_delete(bound, self.dialect)
-        rows = self.db._exec(sql, params)
 
-        self.db.conn.commit()
+        with self.db._lock:
+            rows = self.db._exec_unsafe(sql, params)
+            self.db.conn.commit()
 
         # Tombstone vectors AFTER delete, BEFORE return
         self._tombstone_vectors(rows)

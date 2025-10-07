@@ -8,7 +8,7 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, SearchFilingsAction,
-                           SearchPressReleasesAction, SearchFilingNotesAction, SearchAttachmentsAction,
+                           SearchPressReleasesAction, SearchFilingNotesAction,  # SearchAttachmentsAction,
                            ReadFilingAction, ReadPressReleaseAction, ReadAttachmentAction,
                            ViewFinancialStatementsAction, PythonExecAction)
 
@@ -41,7 +41,7 @@ class Agent:
             SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),  # Disabled for now
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),

@@ -86,26 +86,18 @@ class FilingEightK(BaseFiling):
 
             exhibit_number = document.document_type.replace("EX-", "")
 
-            # Skip 99.1 (press releases are handled separately)
             if exhibit_number == "99.1":
                 continue
 
-            # Check if exhibit type is in included list (e.g., "1", "2", "3")
             exhibit_prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
             if exhibit_prefix not in self.included_exhibits:
                 continue
 
-            # Only process HTML documents
             if not document.is_html():
                 continue
 
-            # Parse HTML content to pages
-            try:
-                parser = Parser(content=document.content)
-                pages = parser.get_pages()
-            except Exception:
-                # Skip attachments that fail to parse
-                continue
+            parser = Parser(content=document.content)
+            pages = parser.get_pages()
 
             if not pages:
                 continue
@@ -125,7 +117,6 @@ class FilingEightK(BaseFiling):
 
             attachment_id = attachment_response.data[0]['id']
 
-            # Upsert attachment pages
             self.database.table("filing_attachment_pages").upsert([{
                 "page": page['page'],
                 "content": page['content'],
@@ -134,5 +125,4 @@ class FilingEightK(BaseFiling):
                 "company_id": self.company_id
             } for page in pages], on_conflict="attachment_id,page").execute()
 
-            # Chunk attachment
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
+            # self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)

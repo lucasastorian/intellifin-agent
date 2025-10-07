@@ -117,7 +117,8 @@ class ReadFilingAction(BaseAction):
         # Build result summary
         company_name = company.get('name', 'Unknown')
         form = filing.get('form', '?')
-        summary = f"Retrieved {len(pages_result.data)} pages: {company_name} {form}"
+        accession = filing.get('accession_number', '?')
+        summary = f"Retrieved {len(pages_result.data)} pages: {company_name} {form} ({accession})"
         if truncated:
             summary += " (truncated)"
 

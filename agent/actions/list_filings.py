@@ -105,7 +105,7 @@ class ListFilingsAction(BaseAction):
             self.database
             .table("company_filings")
             .select(
-                "id,company_id,company_name,company_symbols,company_exchanges,form,items,press_release,"
+                "id,company_id,company_name,company_symbols,company_exchanges,company_delisted,form,items,press_release,"
                 "fiscal_year,fiscal_period,filing_date,report_date,accession_number,num_pages,num_attachments")
             .contains("company_symbols", args.symbols)
             .in_("form", forms)
@@ -131,7 +131,7 @@ class ListFilingsAction(BaseAction):
             companies_result = (
                 self.database
                 .table("companies")
-                .select("id,name,symbols,sector,industry,fiscal_year_end")
+                .select("id,name,symbols,sector,industry,fiscal_year_end,delisted")
                 .in_("id", list(company_ids))
                 .execute()
             )
@@ -195,8 +195,10 @@ class ListFilingsAction(BaseAction):
                 sector = info.get('sector') or 'N/A'
                 industry = info.get('industry') or 'N/A'
                 fiscal_year_end = fmt_fiscal_year_end(info.get('fiscal_year_end'))
+                delisted = info.get('delisted', False)
 
-                header += f"**{name}** ({symbols})\n"
+                delisted_tag = " **[DELISTED]**" if delisted else ""
+                header += f"**{name}** ({symbols}){delisted_tag}\n"
                 header += f"Sector: {sector} | Industry: {industry} | Fiscal Year End: {fiscal_year_end}\n\n"
 
         rows = []

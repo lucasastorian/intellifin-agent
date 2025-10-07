@@ -200,35 +200,39 @@ class Database:
         self._max_vars = 999
         return self._max_vars
 
+    def _exec_unsafe(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
+        """Execute SQL without lock - caller must hold lock. Internal use only."""
+        if self._closed:
+            raise DatabaseError("Cannot execute query on closed database connection")
+        try:
+            cursor = self.conn.execute(sql, params)
+            if cursor.description:
+                cols = [c[0] for c in cursor.description]
+                rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
+                return rows
+            return []
+        except sqlite3.IntegrityError as e:
+            self.conn.rollback()
+            error_name = getattr(e, "sqlite_errorname", "")
+            msg = str(e)
+
+            if error_name == "SQLITE_CONSTRAINT_FOREIGNKEY" or "FOREIGN KEY constraint failed" in msg:
+                raise ForeignKeyError(msg) from e
+            if error_name == "SQLITE_CONSTRAINT_UNIQUE" or "UNIQUE constraint failed" in msg:
+                raise UniqueConstraintError(msg) from e
+            if error_name == "SQLITE_CONSTRAINT_NOTNULL" or "NOT NULL constraint failed" in msg:
+                raise NotNullViolation(msg) from e
+            if error_name == "SQLITE_CONSTRAINT_CHECK" or "CHECK constraint failed" in msg:
+                raise CheckConstraintError(msg) from e
+            raise ConstraintError(msg) from e
+        except sqlite3.Error as e:
+            self.conn.rollback()
+            raise DatabaseError(str(e)) from e
+
     def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
         """Execute SQL with error handling and return rows as dicts."""
         with self._lock:
-            if self._closed:
-                raise DatabaseError("Cannot execute query on closed database connection")
-            try:
-                cursor = self.conn.execute(sql, params)
-                if cursor.description:
-                    cols = [c[0] for c in cursor.description]
-                    rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
-                    return rows
-                return []
-            except sqlite3.IntegrityError as e:
-                self.conn.rollback()
-                error_name = getattr(e, "sqlite_errorname", "")
-                msg = str(e)
-
-                if error_name == "SQLITE_CONSTRAINT_FOREIGNKEY" or "FOREIGN KEY constraint failed" in msg:
-                    raise ForeignKeyError(msg) from e
-                if error_name == "SQLITE_CONSTRAINT_UNIQUE" or "UNIQUE constraint failed" in msg:
-                    raise UniqueConstraintError(msg) from e
-                if error_name == "SQLITE_CONSTRAINT_NOTNULL" or "NOT NULL constraint failed" in msg:
-                    raise NotNullViolation(msg) from e
-                if error_name == "SQLITE_CONSTRAINT_CHECK" or "CHECK constraint failed" in msg:
-                    raise CheckConstraintError(msg) from e
-                raise ConstraintError(msg) from e
-            except sqlite3.Error as e:
-                self.conn.rollback()
-                raise DatabaseError(str(e)) from e
+            return self._exec_unsafe(sql, params)
 
     @classmethod
     def from_file(cls, path: str, schema: Schema):

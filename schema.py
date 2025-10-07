@@ -17,6 +17,7 @@ class Companies(Table):
     country = Text(nullable=True)
     market_cap = Float(nullable=True)
     fiscal_year_end = Text(nullable=True)
+    delisted = Boolean(default=False, nullable=False)
     synced = Boolean(default=False)
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
@@ -69,6 +70,7 @@ class CompanyFilings(View):
     company_exchanges = Field(table="companies", field="exchanges")
     company_sector = Field(table="companies", field="sector")
     company_industry = Field(table="companies", field="industry")
+    company_delisted = Field(table="companies", field="delisted")
 
     created_at = Field(table="filings", field="created_at")
     updated_at = Field(table="filings", field="updated_at")
@@ -432,7 +434,8 @@ class FilingAttachmentChunks(Table):
     id = Serial()
     index = Integer(nullable=False)
     page = Integer(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
+    # NOTE: vector=True disabled for now - may re-enable later if needed
+    content = Text(nullable=False, fts=True)  # vector=True
     has_table = Boolean(nullable=False, default=False, index=True)
 
     attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)

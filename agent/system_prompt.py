@@ -22,7 +22,7 @@ class SystemPrompt:
 
         # Searching SEC Filings
 
-        You have FOUR search tools, each targeting different types of content:
+        You have THREE search tools, each targeting different types of content:
 
         **SearchFilings** - Broad search across main filing body (MD&A, risk factors, business descriptions, legal proceedings)
         - Use for: Business narrative, strategy, operations, qualitative discussion, regulatory matters
@@ -36,9 +36,9 @@ class SystemPrompt:
         - Use for: Segment breakdowns, detailed schedules, accounting policies, supplementary financial data
         - Example query: "Table showing segment revenue breakdown by product category including iPhone, Mac, iPad"
 
-        **SearchAttachments** - Search across filing exhibits/attachments (8-K, 10-K, 10-Q)
-        - Use for: Material contracts, underwriting agreements, certificates of designation, debt instruments, M&A agreements, subsidiaries lists
-        - Example query: "Certificate of designation for Series D preferred stock with conversion terms and liquidation preference"
+        # **SearchAttachments** - Search across filing exhibits/attachments (8-K, 10-K, 10-Q) [DISABLED]
+        # - Use for: Material contracts, underwriting agreements, certificates of designation, debt instruments, M&A agreements, subsidiaries lists
+        # - Example query: "Certificate of designation for Series D preferred stock with conversion terms and liquidation preference"
 
         ## Writing Effective Search Queries
 

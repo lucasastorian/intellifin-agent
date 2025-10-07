@@ -78,7 +78,9 @@ class PythonExecAction(BaseAction):
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
-        self.log_start("PythonExec", thought=args.thought)
+        # Show code in logs (truncate if very long)
+        code_preview = args.code if len(args.code) <= 100 else args.code[:97] + "..."
+        self.log_start("PythonExec", f"Code: {code_preview}", thought=args.thought)
 
         try:
             # Replace semicolons with newlines for multi-statement support
