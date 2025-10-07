@@ -86,12 +86,13 @@ class BaseFiling(ABC):
 
         for note_id, note_data in zip(note_ids, processed_notes):
             # Chunk the note content
-            chunks = self.markdown_chunker.chunk_text(text=note_data['content'])
+            chunks = self.markdown_chunker.split(pages=[{"page": 0, "content": note_data['content']}])
 
             for i, chunk in enumerate(chunks):
                 all_chunks.append({
                     "index": i,
-                    "content": chunk,
+                    "content": chunk.content,
+                    "has_table": chunk.has_table,
                     "filing_note_id": note_id,
                     "filing_id": filing_id,
                     "company_id": self.company_id
@@ -153,6 +154,7 @@ class BaseFiling(ABC):
                 "index": i,
                 "page": chunk.page,
                 "content": chunk.content,
+                "has_table": chunk.has_table,
                 "filing_id": filing_id,
                 "company_id": self.company_id
             } for i, chunk in enumerate(chunks)]

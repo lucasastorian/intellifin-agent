@@ -51,6 +51,7 @@ class CompanyProvisioner:
                     'sector': row.get('Sector', '').strip() or None,
                     'industry': row.get('Industry', '').strip() or None,
                     'market_cap': self._parse_market_cap(row.get('Market Cap', '')),
+                    'country': row.get('Country', '').strip() or None,
                 }
 
         return symbol_map
@@ -95,6 +96,7 @@ class CompanyProvisioner:
                 'sector': csv_record.get('sector'),
                 'industry': csv_record.get('industry'),
                 'market_cap': csv_record.get('market_cap'),
+                'country': csv_record.get('country'),
                 'fiscal_year_end': None,
                 'synced': False,
             })

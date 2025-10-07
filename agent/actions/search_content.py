@@ -24,6 +24,7 @@ class SearchContent(BaseModel):
     - Specify a company using its ticker symbol
     - Specify the types of filings you are interested in - Annual, Quarterly, Current or All
     - The query will search across filing chunks, notes to financial statements, and press release chunks
+    - Optionally filter to only chunks containing tables or only chunks without tables
     """
     query: str = Field(
         description="Natural language description of what you're looking for. Be specific and descriptive!")
@@ -34,6 +35,8 @@ class SearchContent(BaseModel):
     end_date: Optional[str] = Field(default=None, description="The optional end date to filter. "
                                                               "If not specified, will search up until today.")
     limit: int = Field(default=10, description="Maximum number of results to return (default: 10)", max=20)
+    has_table: Optional[bool] = Field(default=None, description="Filter to only chunks with tables (True) "
+                                                                "or without tables (False). If not specified, returns all chunks.")
 
     @classmethod
     @field_validator("symbol")
@@ -123,18 +126,22 @@ class SearchContentAction(BaseAction):
     async def _search_filing_chunks(self, args: SearchContent, forms: List[str]) -> List[dict]:
         """Vector search filing chunks using company_filing_chunks view"""
         try:
-            result = (
+            query = (
                 self.database
                 .table("company_filing_chunks")
                 .select(
-                    "id,filing_id,page,content,index,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                    "id,filing_id,page,content,index,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
-                .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
-                .execute()
             )
+
+            # Apply has_table filter if specified
+            if args.has_table is not None:
+                query = query.eq("has_table", args.has_table)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
 
             # Add result type marker
             for r in result.data:
@@ -148,18 +155,22 @@ class SearchContentAction(BaseAction):
     async def _search_filing_notes(self, args: SearchContent, forms: List[str]) -> List[dict]:
         """Vector search filing note chunks using company_filing_note_chunks view"""
         try:
-            result = (
+            query = (
                 self.database
                 .table("company_filing_note_chunks")
                 .select(
-                    "id,filing_id,filing_note_id,index,note_title,note_filename,content,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                    "id,filing_id,filing_note_id,index,note_title,note_filename,content,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
-                .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
-                .execute()
             )
+
+            # Apply has_table filter if specified
+            if args.has_table is not None:
+                query = query.eq("has_table", args.has_table)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
 
             # Add result type marker
             for r in result.data:
@@ -173,18 +184,22 @@ class SearchContentAction(BaseAction):
     async def _search_press_release_chunks(self, args: SearchContent) -> List[dict]:
         """Vector search press release chunks using company_press_release_chunks view"""
         try:
-            result = (
+            query = (
                 self.database
                 .table("company_press_release_chunks")
-                .select("id,filing_id,page,content,index,form,filing_date,report_date,company_name,company_symbols")
+                .select("id,filing_id,page,content,index,has_table,form,filing_date,report_date,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", ['8-K', '8-K/A'])
                 .eq("press_release", True)
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
-                .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
-                .execute()
             )
+
+            # Apply has_table filter if specified
+            if args.has_table is not None:
+                query = query.eq("has_table", args.has_table)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
 
             # Add result type marker
             for r in result.data:

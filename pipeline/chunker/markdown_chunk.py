@@ -50,6 +50,11 @@ class MarkdownChunk:
         # NOTE: See if you can add context here to improve embedding quality !
         return self.content
 
+    @property
+    def has_table(self) -> bool:
+        """Returns True if this chunk contains one or more table blocks"""
+        return any(block.block_type == 'Table' for block in self.blocks)
+
     def __repr__(self):
         return f"MarkdownChunk(page={self.page}, blocks={len(self.blocks)})"
 

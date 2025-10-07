@@ -61,6 +61,7 @@ class FilingEightK(BaseFiling):
                 "index": i,
                 "page": chunk.page,
                 "content": chunk.content,
+                "has_table": chunk.has_table,
                 "filing_id": filing_id,
                 "company_id": self.company_id
             } for i, chunk in enumerate(chunks)]

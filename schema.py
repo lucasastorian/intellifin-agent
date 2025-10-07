@@ -14,6 +14,7 @@ class Companies(Table):
     sic = Text(nullable=True, index=False)
     sector = Text(nullable=True)
     industry = Text(nullable=True)
+    country = Text(nullable=True)
     market_cap = Float(nullable=True)
     fiscal_year_end = Text(nullable=True)
     synced = Boolean(default=False)
@@ -112,6 +113,7 @@ class FilingNoteChunks(Table):
 
     index = Integer(nullable=False)
     content = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(nullable=False, default=False, index=True)
 
     filing_note_id = Integer(nullable=False, foreign_key="filing_notes.id", on_delete="CASCADE", index=True)
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
@@ -131,6 +133,7 @@ class FilingChunks(Table):
     index = Integer(nullable=False)
     page = Integer(nullable=False)
     content = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(nullable=False, default=False, index=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -219,6 +222,7 @@ class CompanyFilingNoteChunks(View):
     id = Field(table="filing_note_chunks", field="id")
     index = Field(table="filing_note_chunks", field="index")
     content = Field(table="filing_note_chunks", field="content")
+    has_table = Field(table="filing_note_chunks", field="has_table")
     filing_note_id = Field(table="filing_note_chunks", field="filing_note_id")
 
     note_title = Field(table="filing_notes", field="title")
@@ -262,6 +266,7 @@ class PressReleaseChunks(Table):
     index = Integer(nullable=False)
     page = Integer(nullable=False)
     content = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(nullable=False, default=False, index=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -280,6 +285,7 @@ class CompanyFilingChunks(View):
     index = Field(table="filing_chunks", field="index")
     page = Field(table="filing_chunks", field="page")
     content = Field(table="filing_chunks", field="content")
+    has_table = Field(table="filing_chunks", field="has_table")
 
     filing_id = Field(table="filing_chunks", field="filing_id")
     form = Field(table="filings", field="form")
@@ -308,6 +314,7 @@ class CompanyPressReleaseChunks(View):
     index = Field(table="press_release_chunks", field="index")
     page = Field(table="press_release_chunks", field="page")
     content = Field(table="press_release_chunks", field="content")
+    has_table = Field(table="press_release_chunks", field="has_table")
 
     filing_id = Field(table="press_release_chunks", field="filing_id")
     form = Field(table="filings", field="form")

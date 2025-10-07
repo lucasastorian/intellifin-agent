@@ -22,10 +22,16 @@ class SystemPrompt:
         4). Use the 'SearchContent' tool to perform semantic search across filing content.
 
             IMPORTANT - SearchContent uses SEMANTIC SEARCH, NOT keyword search:
-            - Describe WHAT you're looking for in natural language
-            - Be SPECIFIC and DESCRIPTIVE - the more detail, the better the results
-            - Good: "Discussion of revenue growth drivers and market expansion strategies in Q4 2024"
-            - Bad: "revenue" or "Q4" (too vague - use filters for dates/forms instead)
+            - Describe WHAT you're looking for, NOT just keywords
+            - Name the SPECIFIC DOCUMENT or SECTION you want (e.g., "Consolidated Statements of Operations", "MD&A revenue discussion")
+            - Be CONCISE and PRECISE - shorter, focused queries often work better than long descriptions
+
+            Examples:
+            - Good: "Consolidated Statements of Operations showing total net sales"
+            - Good: "MD&A discussion of revenue growth drivers"
+            - Good: "Notes to financial statements describing stock-based compensation"
+            - Bad: "total net sales for fiscal year 2024, including the exact figure reported in the Consolidated Statements of Operations, and any mention of full-year net sales in MD&A. Also capture the prior year comparison figure" (too verbose - dilutes the embedding)
+            - Bad: "revenue" or "Q4" (too vague)
 
             SearchContent searches across:
             - Filing chunks (main filing content)
