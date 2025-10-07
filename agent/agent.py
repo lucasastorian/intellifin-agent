@@ -7,8 +7,8 @@ from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, KeywordSearchFilingsAction,
-                           ReadPressReleaseAction)
+from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, SearchContentAction,
+                           ReadPressReleaseAction, ViewFinancialStatementsAction)
 
 
 class Agent:
@@ -37,7 +37,8 @@ class Agent:
             SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            KeywordSearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
+            SearchContentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         while self.num_iter < self.max_iter:

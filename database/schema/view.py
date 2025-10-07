@@ -124,6 +124,32 @@ class View(Table):
         cols = cls._collect_view_columns()
         base, joins = cls._resolve_join_chain(cls.__bound_schema__)
 
+        # IMPORTANT: Views used with vector_search() must expose an 'id' field that maps
+        # to the underlying table's primary key. This is required because:
+        # 1. Vector stores are keyed by the underlying table's primary key
+        # 2. Filtered vector search needs to map view row IDs to underlying table IDs
+        # 3. The query builder assumes view IDs match the source table IDs for filtering
+        #
+        # Example: id = Field(table="filing_chunks", field="id")
+        #
+        # Verify that 'id' field exists and points to source table's primary key
+        fields = cls.get_fields()
+        if 'id' in fields:
+            id_field = fields['id']
+            src_table = getattr(id_field, '_view_src_table', None)
+            src_field = getattr(id_field, '_view_src_field', None)
+            if src_table and src_field:
+                # Verify the source field is actually the primary key
+                src_table_cls = cls.__bound_schema__.get_table(src_table)
+                src_table_fields = src_table_cls.get_fields()
+                if src_field in src_table_fields:
+                    if not src_table_fields[src_field].primary_key:
+                        raise ValueError(
+                            f"View '{cls.__viewname__}': 'id' field maps to '{src_table}.{src_field}' "
+                            f"which is not a primary key. Views must map 'id' to the underlying table's primary key "
+                            f"for vector_search() compatibility."
+                        )
+
         select_list = ", ".join([f"{expr} AS `{alias}`" for expr, alias in cols])
         join_sql = " ".join(joins)
         sql = (

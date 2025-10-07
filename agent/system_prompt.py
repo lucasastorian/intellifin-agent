@@ -13,7 +13,13 @@ class SystemPrompt:
 
         2). If unsure of the company's ticker symbol, use the 'SearchCompanies' tool to identify the ticker symbol first
 
-        3). Use the 'SearchContent' tool to perform semantic search across filing content.
+        3). Use the 'ViewFinancialStatements' tool to view structured financial statements (income statement, balance sheet, cash flow):
+            - Merges statements across multiple periods into a single comparative table
+            - Supports both annual (10-K) and quarterly (10-Q) statements
+            - For quarterly statements, automatically infers Q4 data from annual filings
+            - Use this for financial metrics, trends, and comparisons across periods
+
+        4). Use the 'SearchContent' tool to perform semantic search across filing content.
 
             IMPORTANT - SearchContent uses SEMANTIC SEARCH, NOT keyword search:
             - Describe WHAT you're looking for in natural language
@@ -26,7 +32,7 @@ class SystemPrompt:
             - Notes to financial statements
             - Press release chunks (from 8-Ks)
 
-        4). Only if you know the exact filing and page range, use the 'ReadFiling' tool to read specific pages.
+        5). Only if you know the exact filing and page range, use the 'ReadFiling' tool to read specific pages.
 
         Do not respond to the user until you have an exact answer.
 

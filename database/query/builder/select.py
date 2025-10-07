@@ -84,8 +84,19 @@ class SelectBuilder(PredMixin, SelectMixin):
             if embedder is None:
                 raise ValueError("No embedder available. Pass embedder argument or set db.embedder")
 
-        # Get or create vector store for this table/column
-        vector_store = self.db.get_or_create_vector_store(self.table, column)
+        # Resolve view to underlying table for vector store lookup
+        vector_table = self.table
+        if self.table in self.schema.views:
+            view_cls = self.schema.views[self.table]
+            type_map = view_cls.type_map(self.schema)
+            if column not in type_map:
+                raise ValueError(f"Column '{column}' not found in view '{self.table}'")
+            # Get the source table for this column
+            view_field = view_cls.get_fields()[column]
+            vector_table = view_field._view_src_table
+
+        # Get or create vector store for the underlying table/column
+        vector_store = self.db.get_or_create_vector_store(vector_table, column)
 
         # Embed query
         query_vec = np.array(embedder.query_vector(query), dtype=np.float32)

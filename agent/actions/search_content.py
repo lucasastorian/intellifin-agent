@@ -25,14 +25,15 @@ class SearchContent(BaseModel):
     - Specify the types of filings you are interested in - Annual, Quarterly, Current or All
     - The query will search across filing chunks, notes to financial statements, and press release chunks
     """
-    query: str = Field(description="Natural language description of what you're looking for. Be specific and descriptive!")
+    query: str = Field(
+        description="Natural language description of what you're looking for. Be specific and descriptive!")
     symbol: str = Field(description="The ticker symbol of the company to search")
     reports: Literal['annual', 'quarterly', 'current', 'all'] = Field(
         description="Whether to search annual, quarterly, current reports, or ALL three.")
     start_date: str = Field(description="The YYYY-MM-DD filing date for which to start the query")
     end_date: Optional[str] = Field(default=None, description="The optional end date to filter. "
                                                               "If not specified, will search up until today.")
-    limit: int = Field(default=20, description="Maximum number of results to return (default: 20)")
+    limit: int = Field(default=10, description="Maximum number of results to return (default: 10)", max=20)
 
     @classmethod
     @field_validator("symbol")
@@ -120,133 +121,76 @@ class SearchContentAction(BaseAction):
         return Message(role="tool", status="completed", content=content, action_id=action.id)
 
     async def _search_filing_chunks(self, args: SearchContent, forms: List[str]) -> List[dict]:
-        """Vector search filing chunks"""
+        """Vector search filing chunks using company_filing_chunks view"""
         try:
-            # Join with company_filings view to get company/filing metadata
             result = (
                 self.database
-                .table("filing_chunks")
-                .select("filing_chunks.id,filing_chunks.filing_id,filing_chunks.page,filing_chunks.content,filing_chunks.index")
+                .table("company_filing_chunks")
+                .select(
+                    "id,filing_id,page,content,index,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", forms)
+                .gte("filing_date", args.start_date)
+                .lte("filing_date", args.end_date)
                 .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
                 .execute()
             )
 
-            # Get filing IDs to join with metadata
-            filing_ids = [r['filing_id'] for r in result.data]
-            if not filing_ids:
-                return []
-
-            # Fetch metadata from company_filings view
-            metadata = (
-                self.database
-                .table("company_filings")
-                .select("id,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
-                .contains("company_symbols", args.symbol)
-                .in_("form", forms)
-                .in_("id", filing_ids)
-                .gte("filing_date", args.start_date)
-                .lte("filing_date", args.end_date)
-                .execute()
-            )
-
-            # Create metadata lookup
-            metadata_map = {m['id']: m for m in metadata.data}
-
-            # Enrich results with metadata
-            enriched = []
+            # Add result type marker
             for r in result.data:
-                meta = metadata_map.get(r['filing_id'])
-                if meta:
-                    r.update(meta)
-                    r['_type'] = 'filing_chunk'
-                    enriched.append(r)
+                r['_type'] = 'filing_chunk'
 
-            return enriched
+            return result.data
         except Exception as e:
             self.log_error(f"Filing chunks search failed: {e}")
             return []
 
     async def _search_filing_notes(self, args: SearchContent, forms: List[str]) -> List[dict]:
-        """Vector search filing notes"""
+        """Vector search filing note chunks using company_filing_note_chunks view"""
         try:
             result = (
                 self.database
-                .table("filing_notes")
-                .select("filing_notes.id,filing_notes.filing_id,filing_notes.title,filing_notes.content")
+                .table("company_filing_note_chunks")
+                .select(
+                    "id,filing_id,filing_note_id,index,note_title,note_filename,content,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", forms)
+                .gte("filing_date", args.start_date)
+                .lte("filing_date", args.end_date)
                 .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
                 .execute()
             )
 
-            filing_ids = [r['filing_id'] for r in result.data]
-            if not filing_ids:
-                return []
-
-            metadata = (
-                self.database
-                .table("company_filings")
-                .select("id,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
-                .contains("company_symbols", args.symbol)
-                .in_("form", forms)
-                .in_("id", filing_ids)
-                .gte("filing_date", args.start_date)
-                .lte("filing_date", args.end_date)
-                .execute()
-            )
-
-            metadata_map = {m['id']: m for m in metadata.data}
-
-            enriched = []
+            # Add result type marker
             for r in result.data:
-                meta = metadata_map.get(r['filing_id'])
-                if meta:
-                    r.update(meta)
-                    r['_type'] = 'filing_note'
-                    enriched.append(r)
+                r['_type'] = 'filing_note_chunk'
 
-            return enriched
+            return result.data
         except Exception as e:
-            self.log_error(f"Filing notes search failed: {e}")
+            self.log_error(f"Filing note chunks search failed: {e}")
             return []
 
     async def _search_press_release_chunks(self, args: SearchContent) -> List[dict]:
-        """Vector search press release chunks"""
+        """Vector search press release chunks using company_press_release_chunks view"""
         try:
             result = (
                 self.database
-                .table("press_release_chunks")
-                .select("press_release_chunks.id,press_release_chunks.filing_id,press_release_chunks.page,press_release_chunks.content,press_release_chunks.index")
+                .table("company_press_release_chunks")
+                .select("id,filing_id,page,content,index,form,filing_date,report_date,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", ['8-K', '8-K/A'])
+                .eq("press_release", True)
+                .gte("filing_date", args.start_date)
+                .lte("filing_date", args.end_date)
                 .vector_search(args.query, "content", topk=args.limit * 2, return_scores=True)
                 .execute()
             )
 
-            filing_ids = [r['filing_id'] for r in result.data]
-            if not filing_ids:
-                return []
-
-            metadata = (
-                self.database
-                .table("company_filings")
-                .select("id,form,filing_date,report_date,company_name,company_symbols")
-                .contains("company_symbols", args.symbol)
-                .in_("form", ['8-K', '8-K/A'])
-                .eq("press_release", True)
-                .in_("id", filing_ids)
-                .gte("filing_date", args.start_date)
-                .lte("filing_date", args.end_date)
-                .execute()
-            )
-
-            metadata_map = {m['id']: m for m in metadata.data}
-
-            enriched = []
+            # Add result type marker
             for r in result.data:
-                meta = metadata_map.get(r['filing_id'])
-                if meta:
-                    r.update(meta)
-                    r['_type'] = 'press_release_chunk'
-                    enriched.append(r)
+                r['_type'] = 'press_release_chunk'
 
-            return enriched
+            return result.data
         except Exception as e:
             self.log_error(f"Press release chunks search failed: {e}")
             return []
@@ -290,8 +234,8 @@ class SearchContentAction(BaseAction):
 
             if result_type == 'filing_chunk':
                 output.append(self._format_filing_chunk(r))
-            elif result_type == 'filing_note':
-                output.append(self._format_filing_note(r))
+            elif result_type == 'filing_note_chunk':
+                output.append(self._format_filing_note_chunk(r))
             elif result_type == 'press_release_chunk':
                 output.append(self._format_press_release_chunk(r))
 
@@ -310,17 +254,18 @@ class SearchContentAction(BaseAction):
         content = (r.get('content') or '').strip()
         score = r.get('_score', 0.0)
 
-        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-            f"**[Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
-            (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
-            f"{content}\n\n---\n"
+                f"**[Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
+                f"{content}\n\n---\n"
         )
 
     @staticmethod
-    def _format_filing_note(r: dict) -> str:
-        """Format filing note result"""
+    def _format_filing_note_chunk(r: dict) -> str:
+        """Format filing note chunk result"""
         company_name = r.get('company_name', 'Unknown')
         symbols = ','.join(r.get('company_symbols', []))
         form = r.get('form', '?')
@@ -328,16 +273,17 @@ class SearchContentAction(BaseAction):
         report_date = r.get('report_date', '?')
         fiscal_year = r.get('fiscal_year', '')
         fiscal_period = r.get('fiscal_period', '')
-        title = r.get('title', 'Untitled Note')
+        note_title = r.get('note_title', 'Untitled Note')
         content = (r.get('content') or '').strip()
         score = r.get('_score', 0.0)
 
-        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-            f"**[Note] {title}** | Score: {score:.3f} | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
-            (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
-            f"{content}\n\n---\n"
+                f"**[Note Chunk #{r['index']}] {note_title}** | Score: {score:.3f} | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
+                f"{content}\n\n---\n"
         )
 
     @staticmethod
@@ -352,6 +298,6 @@ class SearchContentAction(BaseAction):
         score = r.get('_score', 0.0)
 
         return (
-            f"**[Press Release Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}\n\n" +
-            f"{content}\n\n---\n"
+                f"**[Press Release Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}\n\n" +
+                f"{content}\n\n---\n"
         )

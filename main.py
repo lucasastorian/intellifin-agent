@@ -1,10 +1,15 @@
 import asyncio
 import argparse
+import logging
 from dotenv import load_dotenv
 from agent.agent import Agent
+from utils.print_messages import print_messages
+
 
 if __name__ == '__main__':
     load_dotenv()
+
+    logging.getLogger('edgar.core').setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('query', type=str, help='Query to send to the agent')
@@ -22,3 +27,5 @@ if __name__ == '__main__':
     )
 
     asyncio.run(agent.run(query=args.query))
+
+    print_messages(agent)

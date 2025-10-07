@@ -76,7 +76,7 @@ class FinancialStatements(Table):
     type = Enum(choices=['income_statement', 'balance_sheet', 'cash_flow', 'equity_statement',
                          'comprehensive_income'], nullable=False, index=True)
 
-    data = JSONField(nullable=False)  # Structured sections as JSON (NULL if not present)
+    data = JSONField(nullable=False)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -94,7 +94,7 @@ class FilingNotes(Table):
 
     title = Text(nullable=False)
     filename = Text(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
+    content = Text(nullable=False, fts=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -103,6 +103,24 @@ class FilingNotes(Table):
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
     __uniques__ = [("filing_id", "filename")]
+
+
+class FilingNoteChunks(Table):
+    __tablename__ = "filing_note_chunks"
+
+    id = Serial()
+
+    index = Integer(nullable=False)
+    content = Text(nullable=False, fts=True, vector=True)
+
+    filing_note_id = Integer(nullable=False, foreign_key="filing_notes.id", on_delete="CASCADE", index=True)
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_note_id", "index")]
 
 
 class FilingChunks(Table):
@@ -194,6 +212,32 @@ class CompanyFilingNotes(View):
     company_industry = Field(table="companies", field="industry")
 
 
+class CompanyFilingNoteChunks(View):
+    __viewname__ = "company_filing_note_chunks"
+    __tables__ = (FilingNoteChunks, FilingNotes, Filings, Companies)
+
+    id = Field(table="filing_note_chunks", field="id")
+    index = Field(table="filing_note_chunks", field="index")
+    content = Field(table="filing_note_chunks", field="content")
+    filing_note_id = Field(table="filing_note_chunks", field="filing_note_id")
+
+    note_title = Field(table="filing_notes", field="title")
+    note_filename = Field(table="filing_notes", field="filename")
+
+    filing_id = Field(table="filing_note_chunks", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_note_chunks", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+
+
 class PressReleasePages(Table):
     __tablename__ = "press_release_pages"
 
@@ -228,6 +272,62 @@ class PressReleaseChunks(Table):
     __uniques__ = [("filing_id", "index")]
 
 
+class CompanyFilingChunks(View):
+    __viewname__ = "company_filing_chunks"
+    __tables__ = (FilingChunks, Filings, Companies)
+
+    id = Field(table="filing_chunks", field="id")
+    index = Field(table="filing_chunks", field="index")
+    page = Field(table="filing_chunks", field="page")
+    content = Field(table="filing_chunks", field="content")
+
+    filing_id = Field(table="filing_chunks", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_chunks", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
+class CompanyPressReleaseChunks(View):
+    __viewname__ = "company_press_release_chunks"
+    __tables__ = (PressReleaseChunks, Filings, Companies)
+
+    id = Field(table="press_release_chunks", field="id")
+    index = Field(table="press_release_chunks", field="index")
+    page = Field(table="press_release_chunks", field="page")
+    content = Field(table="press_release_chunks", field="content")
+
+    filing_id = Field(table="press_release_chunks", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    press_release = Field(table="filings", field="press_release")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="press_release_chunks", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
 class CompanyFilingPressReleases(View):
     __viewname__ = "company_filing_press_releases"
     __tables__ = (PressReleasePages, Filings, Companies)
@@ -255,17 +355,45 @@ class CompanyFilingPressReleases(View):
     company_industry = Field(table="companies", field="industry")
 
 
+class CompanyFinancialStatements(View):
+    __viewname__ = "company_financial_statements"
+    __tables__ = (FinancialStatements, Filings, Companies)
+
+    id = Field(table="financial_statements", field="id")
+    type = Field(table="financial_statements", field="type")
+    data = Field(table="financial_statements", field="data")
+
+    filing_id = Field(table="financial_statements", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="financial_statements", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_cik = Field(table="companies", field="cik")
+
+
 schema = Schema()
 schema.add_table(Companies)
 schema.add_table(Filings)
 schema.add_table(FinancialStatements)
 schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
-schema.add_table(FilingChunks)
 schema.add_table(PressReleasePages)
+schema.add_table(FilingChunks)
 schema.add_table(PressReleaseChunks)
+schema.add_table(FilingNoteChunks)
 
 schema.add_view(CompanyFilings)
 schema.add_view(CompanyFilingPages)
 schema.add_view(CompanyFilingNotes)
+schema.add_view(CompanyFilingNoteChunks)
+schema.add_view(CompanyFilingChunks)
+schema.add_view(CompanyPressReleaseChunks)
 schema.add_view(CompanyFilingPressReleases)
+schema.add_view(CompanyFinancialStatements)

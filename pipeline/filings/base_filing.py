@@ -56,7 +56,7 @@ class BaseFiling(ABC):
         return pages
 
     def _upsert_filing_notes(self, filing_id: int):
-        """Upserts all the notes associated with the filing"""
+        """Upserts all the notes associated with the filing and their chunks"""
         if not self.filing.reports:
             return None
 
@@ -71,15 +71,52 @@ class BaseFiling(ABC):
                                     "filename": note.html_file_name, "filing_id": filing_id,
                                     "company_id": self.company_id})
 
-        self.database.table("filing_notes").upsert(processed_notes, on_conflict="filing_id,filename").execute()
+        response = self.database.table("filing_notes").upsert(processed_notes, on_conflict="filing_id,filename").execute()
+
+        note_ids = [note['id'] for note in response.data]
+
+        # Chunk each note
+        self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
+
+        return note_ids
+
+    def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
+        """Chunks filing notes and upserts them"""
+        all_chunks = []
+
+        for note_id, note_data in zip(note_ids, processed_notes):
+            # Chunk the note content
+            chunks = self.markdown_chunker.chunk_text(text=note_data['content'])
+
+            for i, chunk in enumerate(chunks):
+                all_chunks.append({
+                    "index": i,
+                    "content": chunk,
+                    "filing_note_id": note_id,
+                    "filing_id": filing_id,
+                    "company_id": self.company_id
+                })
+
+        if all_chunks:
+            self.database.table("filing_note_chunks").upsert(
+                all_chunks,
+                on_conflict="filing_note_id,index"
+            ).execute()
 
     def _upsert_financial_statements(self, xbrl: Optional[XBRL], filing_id: int):
         """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
         if xbrl is None:
             return
 
-        statements = FinancialStatements(xbrl=xbrl, report_date=self.report_date, filing_id=filing_id,
-                                         company_id=self.company_id, database=self.database)
+        fiscal_period = xbrl.entity_info.get('fiscal_period') if xbrl else None
+        statements = FinancialStatements(
+            xbrl=xbrl,
+            report_date=self.report_date,
+            filing_id=filing_id,
+            company_id=self.company_id,
+            database=self.database,
+            fiscal_period=fiscal_period
+        )
         statements.upsert_statements()
 
     @staticmethod
