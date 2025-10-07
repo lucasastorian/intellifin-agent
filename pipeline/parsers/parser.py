@@ -13,6 +13,7 @@ BOLD_TAGS = {"b", "strong"}
 ITALIC_TAGS = {"i", "em"}
 
 _ws = re.compile(r"\s+")
+_css_decl = re.compile(r"^[a-zA-Z\-]+\s*:\s*[^;]+;\s*$")
 
 
 class Parser:
@@ -80,6 +81,8 @@ class Parser:
 
     @staticmethod
     def _clean_text(text: str) -> str:
+        # Remove zero-width spaces, BOM, normalize NBSP
+        text = text.replace("\u200b", "").replace("\ufeff", "").replace("\xa0", " ")
         return _ws.sub(" ", text).strip()
 
     @staticmethod
@@ -116,7 +119,11 @@ class Parser:
         self._blankline_before(page_num)
 
     def _process_text_node(self, node: NavigableString) -> str:
-        return self._clean_text(str(node))
+        text = self._clean_text(str(node))
+        # Filter out CSS fragments like "blacklining:none;"
+        if text and _css_decl.match(text):
+            return ""
+        return text
 
     def _process_element(self, element: Union[Tag, NavigableString]) -> str:
         if isinstance(element, NavigableString):
@@ -125,6 +132,27 @@ class Parser:
         if element.name == "table":
             self.includes_table = True
             return TableParser(element).md().strip()
+
+        # Handle lists
+        if element.name in {"ul", "ol"}:
+            items = []
+            for li in element.find_all("li", recursive=False):
+                item_text = self._process_element(li).strip()
+                if item_text:
+                    # Remove leading bullets/numbers from raw HTML
+                    item_text = item_text.lstrip("•·∙◦▪▫-").strip()
+                    items.append(item_text)
+            if not items:
+                return ""
+            if element.name == "ol":
+                return "\n".join(f"{i+1}. {t}" for i, t in enumerate(items))
+            else:
+                return "\n".join(f"- {t}" for t in items)
+
+        if element.name == "li":
+            # Render children inline for list items
+            parts = [self._process_element(c) for c in element.children]
+            return " ".join(p for p in parts if p).strip()
 
         parts: List[str] = []
         for child in element.children:
@@ -152,7 +180,7 @@ class Parser:
         if isinstance(root, NavigableString):
             t = self._process_text_node(root)
             if t:
-                self._append(page_num, t)
+                self._append(page_num, t + " ")  # Add space to prevent wrapper bleeding
             return page_num
 
         if not isinstance(root, Tag):
@@ -165,7 +193,8 @@ class Parser:
         if is_block:
             self._blankline_before(page_num)
 
-        if root.name == "table":
+        # Handle tables and lists atomically
+        if root.name in {"table", "ul", "ol"}:
             t = self._process_element(root)
             if t:
                 self._append(page_num, t)
@@ -174,16 +203,20 @@ class Parser:
                 page_num += 1
             return page_num
 
+        # For inline wrappers (bold/italic), render atomically to avoid wrapper bleeding
         wrap = self._wrap_markdown(root)
-        if wrap:
-            self._append(page_num, wrap)
+        if wrap and not is_block:
+            t = self._process_element(root)
+            if t:
+                self._append(page_num, t + " ")
+            if self._has_break_after(root):
+                page_num += 1
+            return page_num
 
+        # Stream children for block elements
         current = page_num
         for child in root.children:
             current = self._stream_pages(child, current)
-
-        if wrap:
-            self._append(current, wrap)
 
         if is_block:
             self._blankline_after(current)
@@ -202,6 +235,9 @@ class Parser:
         result: List[dict] = []
         for page_num in sorted(self.pages.keys()):
             raw = "".join(self.pages[page_num])
+
+            # Collapse excessive newlines
+            raw = re.sub(r"\n{3,}", "\n\n", raw)
 
             lines: List[str] = []
             for line in raw.split("\n"):

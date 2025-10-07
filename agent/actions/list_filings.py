@@ -19,10 +19,13 @@ class ListFilings(BaseModel):
     - For each form - will return both original submissions and amendments where applicable.
     - The fiscal period (Q1/Q2/Q3/FY) and fiscal year returned in the table are from the companies' own fiscal calendar
     """
+    thought: str = Field(
+        description="Describe what you're searching for and how it will help you achieve your objective"
+    )
     symbols: List[str] = Field(..., description="Ticker symbols to include (e.g., ['AAPL','MSFT']).", min_length=1)
     forms: List[AllowedForm] = Field(..., description="Forms to include in the search results. ", min_length=1)
-    start_date: str = Field(..., description="Filter by filing_date >= this ISO date 'YYYY-MM-DD'.")
-    end_date: Optional[str] = Field(..., description="Filter by filing_date <= this ISO date 'YYYY-MM-DD'. "
+    start_date: str = Field(..., description="Filter by report_date >= this ISO date 'YYYY-MM-DD'.")
+    end_date: Optional[str] = Field(..., description="Filter by report_date <= this ISO date 'YYYY-MM-DD'. "
                                                      "Defaults to today.")
     include_items: Optional[List[str]] = Field(
         default=None,
@@ -81,7 +84,7 @@ class ListFilingsAction(BaseAction):
         if args.include_items:
             params += f", items={','.join(args.include_items)}"
 
-        self.log_start("ListFilings", params)
+        self.log_start("ListFilings", params=params, thought=args.thought)
 
         not_found = self.sync_symbols(symbols=args.symbols)
         if not_found:
@@ -105,15 +108,15 @@ class ListFilingsAction(BaseAction):
                 "fiscal_year,fiscal_period,filing_date,report_date,accession_number")
             .contains("company_symbols", args.symbols)
             .in_("form", forms)
-            .gte("filing_date", args.start_date)
-            .lte("filing_date", args.end_date or date.today().isoformat())
+            .gte("report_date", args.start_date)
+            .lte("report_date", args.end_date or date.today().isoformat())
         )
 
         if args.include_items:
             for item_code in args.include_items:
                 qb = qb.contains("items", item_code)
 
-        filings_result = qb.order("filing_date", desc=True).limit(50).execute()
+        filings_result = qb.order("report_date", desc=True).limit(50).execute()
 
         if not filings_result.data:
             self.log_done("No filings found")

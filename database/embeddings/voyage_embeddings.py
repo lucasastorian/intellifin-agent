@@ -33,7 +33,6 @@ class VoyageEmbeddings:
 
         self.client = voyageai.Client(api_key=api_key)
 
-        # Initialize cache
         self.cache = EmbeddingCache(model=model) if cache else None
 
     def query_vector(self, text: str) -> List[float]:
@@ -43,17 +42,14 @@ class VoyageEmbeddings:
     def embed(self, texts: List[str]) -> List[List[float]]:
         """Generates a flat list of embeddings for all texts."""
         if not self.cache:
-            # No cache - embed everything
             return [
                 embedding
                 for batch in self._batch_texts(texts=texts)
                 for embedding in self._embed(batch, input_type="document")
             ]
 
-        # Check cache for each text
         cached = self.cache.get_many(texts)
 
-        # Separate cached vs uncached
         uncached_texts = []
         uncached_indices = []
         for i, (text, cached_emb) in enumerate(zip(texts, cached)):
@@ -61,7 +57,6 @@ class VoyageEmbeddings:
                 uncached_texts.append(text)
                 uncached_indices.append(i)
 
-        # Embed uncached texts
         if uncached_texts:
             logging.debug(f"Cache miss: {len(uncached_texts)}/{len(texts)} texts")
             new_embeddings = [

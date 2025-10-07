@@ -71,9 +71,11 @@ class BaseAction(ABC):
         }
         return f"{colors.get(color, '')}{text}{colors['reset']}"
 
-    def log_start(self, action: str, params: str = ""):
+    def log_start(self, action: str, params: str = "", thought: str = ""):
         """Log action start with name and parameters"""
         print(f"\n{self._c(action, 'cyan')}", flush=True)
+        if thought:
+            print(f"  {self._c('💭', 'magenta')} {thought}", flush=True)
         if params:
             print(f"  {self._c('→', 'dim')} {params}", flush=True)
 

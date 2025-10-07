@@ -12,11 +12,15 @@ class SearchFilings(BaseModel):
     - Use the 'query' to describe what you're looking for in natural language, ex. 'Statement of operations includes revenues' or 'AI Capex guidance for 2025'
     - This is NOT a keyword search - the more accurately you can describe the excerpt you are searching for, the better the search results will be
     - Specify a symbol of the company whose filings you want to search through. If unsure - use the 'SearchCompanies' tool first
-    - Specify a start_date (YYYY-MM-DD) - the starting report_date for which to search
-    - Optionally specify an end date. If left unfilled, will search up to today
+
+    IMPORTANT - Date Range Logic:
+    - start_date and end_date filter by REPORT DATE (when the filing covers, not when it was filed)
+    - To find guidance/plans for year X, search filings from year X-1 or earlier (companies provide forward-looking guidance in current filings)
+    - Example: To find "2025 capex guidance", search reports from 2024 (or even late 2023), NOT 2025
+    - Example: To find "Q1 2025 results", search reports from Q1 2025
+
     - Optionally specify the types of reports you want to search. Annual, quarterly, current or all of them.
     - Optionally restrict the search ONLY to tables. This is helpful if you are looking for a table - such as a segment breakdown - in particular.
-
     """
     thought: str = Field(
         description="Describe what you're searching for and how it will help you achieve your objective"
@@ -70,7 +74,7 @@ class SearchFilingsAction(BaseAction):
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
         params = f"'{args.query}' in {args.symbol} {args.reports}, {args.start_date} → {args.end_date}"
-        self.log_start("SearchFilings", params)
+        self.log_start("SearchFilings", params=params, thought=args.thought)
 
         not_found = self.sync_symbols(symbols=[args.symbol])
         if not_found:
