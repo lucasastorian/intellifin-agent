@@ -54,6 +54,7 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = ON;")
         self.conn.execute("PRAGMA journal_mode = WAL;")
         self.conn.execute("PRAGMA synchronous = NORMAL;")
+        self.conn.execute("PRAGMA busy_timeout = 5000;")
 
         self._provision_schema_if_needed()
         self._ensure_fts_objects()

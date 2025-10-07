@@ -10,10 +10,14 @@ if __name__ == '__main__':
     load_dotenv()
 
     logging.getLogger('edgar.core').setLevel(logging.ERROR)
+    logging.getLogger('pipeline.filings.filing_tenk').setLevel(logging.ERROR)
+    logging.getLogger('pipeline.filings.filing_tenq').setLevel(logging.ERROR)
+    logging.getLogger('pipeline.filings.filing_twentyf').setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
-    parser.add_argument('query', type=str, help='Query to send to the agent')
-    parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5-mini)')
+    parser.add_argument('--query', type=str, help='Query to send to the agent',
+                        default='''Of AMZN, META, or GOOG, who plans to spend the most in capex in 2025?''')
+    parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
     parser.add_argument('--max-iter', type=int, default=10, help='Max iterations (default: 10)')
 

@@ -7,7 +7,7 @@ from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions import (SearchCompaniesAction, SearchFilingsAction, ReadFilingAction, SearchContentAction,
+from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchFilingsAction, ReadFilingAction,
                            ReadPressReleaseAction, ViewFinancialStatementsAction)
 
 
@@ -15,7 +15,7 @@ class Agent:
 
     start_year: int = 2018
 
-    def __init__(self, edgar_user_agent: str, model: str = "gpt-5-mini", temperature: float = 1.0, max_iter: int = 10):
+    def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20):
         self.edgar_user_agent = edgar_user_agent
         self.client = OpenAIClient(model=model, temperature=temperature)
         self.num_iter = 0
@@ -27,28 +27,28 @@ class Agent:
         provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
         provisioner.provision()
 
-    async def run(self, query: str):
+    async def run(self, query: str) -> Optional[str]:
         """Runs the assistant with the given query"""
         self.messages.append(Message(role="system", status="completed", content=SystemPrompt().format()))
         self.messages.append(Message(role="user", status="completed", content=query))
 
         actions = [
-            SearchCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchContentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         while self.num_iter < self.max_iter:
             terminate = await self.step(actions=actions)
             if terminate:
-                break
+                return self.messages[-1].content
 
             self.num_iter += 1
 
-        return
+        return None
 
     async def step(self, actions: List[BaseAction]):
         """Executes a single step in the agent loop"""

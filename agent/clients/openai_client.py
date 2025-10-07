@@ -10,7 +10,7 @@ from agent.message import Message, Action
 
 class OpenAIClient:
 
-    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 1.0, provider: Literal['OpenAI'] = 'OpenAI'):
+    def __init__(self, model: str = "gpt-5", temperature: float = 1.0, provider: Literal['OpenAI'] = 'OpenAI'):
         self.model = model
         self.temperature = temperature
         self.provider = provider

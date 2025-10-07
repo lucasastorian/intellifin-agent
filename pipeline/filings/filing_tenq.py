@@ -4,6 +4,8 @@ from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
 
+logger = logging.getLogger(__name__)
+
 
 class FilingTenQ(BaseFiling):
 
@@ -12,7 +14,7 @@ class FilingTenQ(BaseFiling):
         xbrl = self.filing.xbrl()
 
         if xbrl is None:
-            logging.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
+            logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
         pages = self._upsert_filing_pages(filing_id=filing_id)

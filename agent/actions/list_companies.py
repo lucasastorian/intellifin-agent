@@ -6,8 +6,8 @@ from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
 
 
-class SearchCompanies(BaseModel):
-    """Search for companies by name. Returns matching companies with their symbols and metadata.
+class ListCompanies(BaseModel):
+    """List for companies with a matching name. Returns matching companies with their symbols and metadata.
 
     - Use this when you don't know the ticker symbol for a company
     - Performs case-insensitive partial name matching
@@ -16,14 +16,14 @@ class SearchCompanies(BaseModel):
     query: str = Field(description="Company name or partial name to search for (e.g., 'Apple', 'Microsoft')")
 
 
-class SearchCompaniesAction(BaseAction):
-    name: str = 'SearchCompanies'
-    schema = SearchCompanies
+class ListCompaniesAction(BaseAction):
+    name: str = 'ListCompanies'
+    schema = ListCompanies
     limit: int = 10
 
     async def call(self, action: Action):
         """Searches companies by name"""
-        self.log_start("SearchCompanies")
+        self.log_start("ListCompanies")
 
         try:
             args = self.validate(action)
@@ -67,10 +67,10 @@ class SearchCompaniesAction(BaseAction):
         return Message(role="tool", status="completed", content=content, action_id=action.id)
 
     @staticmethod
-    def validate(action: Action) -> SearchCompanies:
+    def validate(action: Action) -> ListCompanies:
         """Validates the action against the Pydantic schema"""
         try:
-            return SearchCompanies(**action.body)
+            return ListCompanies(**action.body)
         except ValidationError as e:
             raise RuntimeError(f"Validation failed: {e}") from e
 

@@ -1,67 +1,55 @@
-import pandas as pd
-from datetime import date
 from typing import List, Literal, Optional
+from datetime import date
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
 
-AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
-
 
 class SearchFilings(BaseModel):
-    """Search SEC filings based on the ticker symbol, forms, and start date (limited to 50 filings)
+    """Perform a natural language search through chunked excerpts from filings, notes, and press releases
 
-    - Use this first to identify filings before reading or searching text.
-    - Returns a Markdown table with: id, company name, ticker symbol(s), exchange(s), form, items (for 8-K), press release (X),
-        report_date, filing_date, fiscal_period, fiscal_year.
-    - Results sorted by filing_date in descending order
-    - For each form - will return both original submissions and amendments where applicable.
-    - The fiscal period (Q1/Q2/Q3/FY) and fiscal year returned in the table are from the companies' own fiscal calendar
+    - Use the 'query' to describe what you're looking for in natural language, ex. 'Statement of operations includes revenues' or 'AI Capex guidance for 2025'
+    - This is NOT a keyword search - the more accurately you can describe the excerpt you are searching for, the better the search results will be
+    - Specify a symbol of the company whose filings you want to search through. If unsure - use the 'SearchCompanies' tool first
+    - Specify a start_date (YYYY-MM-DD) - the starting report_date for which to search
+    - Optionally specify an end date. If left unfilled, will search up to today
+    - Optionally specify the types of reports you want to search. Annual, quarterly, current or all of them.
+    - Optionally restrict the search ONLY to tables. This is helpful if you are looking for a table - such as a segment breakdown - in particular.
 
-    Typical uses:
-    - "Find 8-Ks with item 9.01 (i.e. press releases) for AMD in 2024."
-    - "Identify the 10K for AAPL's fiscal year 2025"
     """
-    symbols: List[str] = Field(..., description="Ticker symbols to include (e.g., ['AAPL','MSFT']).", min_length=1)
-    forms: List[AllowedForm] = Field(..., description="Forms to include in the search results. ", min_length=1)
-    start_date: str = Field(..., description="Filter by filing_date >= this ISO date 'YYYY-MM-DD'.")
-    end_date: Optional[str] = Field(..., description="Filter by filing_date <= this ISO date 'YYYY-MM-DD'. "
-                                                     "Defaults to today.")
-    include_items: Optional[List[str]] = Field(
-        default=None,
-        description="For 8-Ks, optionally require specific items (e.g., ['9.01']). Ignored for other forms."
+    thought: str = Field(
+        description="Describe what you're searching for and how it will help you achieve your objective"
     )
+    query: str = Field(
+        description="Natural language description of what you're looking for. Be specific and descriptive!")
+    symbol: str = Field(description="The ticker symbol of the company to search")
+    start_date: str = Field(description="The YYYY-MM-DD filing date for which to start the query")
+    end_date: Optional[str] = Field(default=None, description="The optional end date to filter. "
+                                                              "If not specified, will search up until today.")
+    reports: Literal['annual', 'quarterly', 'current', 'all'] = Field(
+        default="all",
+        description="Whether to search annual (20-F/10-K/DEF 14A), quarterly (10-Q), current reports (, or ALL three.")
+    tables_only: Optional[bool] = Field(default=None,
+                                        description="Filter to only chunks with tables (True) "
+                                                    "or without tables (False). If not specified, returns all chunks.")
+    limit: int = Field(default=5, description="Maximum number of results to return (default: 10)", max=10)
+
 
     @classmethod
-    @field_validator("symbols")
-    def norm_symbols(cls, v: List[str]) -> List[str]:
-        out = [s.strip().upper() for s in v if str(s).strip()]
-        return list(set(out))
+    @field_validator("symbol")
+    def norm_symbol(cls, v: str) -> str:
+        return v.strip().upper()
 
     @classmethod
     @field_validator("start_date")
     def check_start_date(cls, v: str) -> str:
-        _ = date.fromisoformat(v)  # raises if invalid
-        return v
-
-    @classmethod
-    @field_validator("end_date")
-    def check_end_date(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return date.today().isoformat()
         _ = date.fromisoformat(v)
         return v
 
-    @classmethod
-    @field_validator("start_date")
-    def check_start_date(cls, v: str) -> str:
-        _ = date.fromisoformat(v)  # raises if invalid
-        return v
-
-    @classmethod
     @field_validator("end_date")
-    def check_end_date(cls, v: Optional[str]) -> Optional[str]:
+    @classmethod
+    def check_end_date(cls, v: Optional[str]) -> str:
         if v is None:
             return date.today().isoformat()
         _ = date.fromisoformat(v)
@@ -73,7 +61,7 @@ class SearchFilingsAction(BaseAction):
     schema = SearchFilings
 
     async def call(self, action: Action):
-        """Calls the search filings actions and returns a MD table of """
+        """Semantic search across filing chunks, notes, and press releases"""
         try:
             args = self.validate(action)
         except RuntimeError as e:
@@ -81,108 +69,241 @@ class SearchFilingsAction(BaseAction):
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
-        params = f"{', '.join(args.symbols)} ({', '.join(args.forms)}), {args.start_date} → {args.end_date or ''}"
-        if args.include_items:
-            params += f", items={','.join(args.include_items)}"
-
+        params = f"'{args.query}' in {args.symbol} {args.reports}, {args.start_date} → {args.end_date}"
         self.log_start("SearchFilings", params)
 
-        not_found = self.sync_symbols(symbols=args.symbols)
+        not_found = self.sync_symbols(symbols=[args.symbol])
         if not_found:
-            self.log_error(f"Symbols not found: {', '.join(sorted(not_found))}")
+            self.log_error(f"Symbol not found: {args.symbol}")
             return Message(
                 role="tool",
                 status="completed",
-                content=f"Could not find the following symbols on EDGAR: {sorted(not_found)}",
+                content=f"Could not find symbol {args.symbol} on EDGAR",
                 error=True,
                 action_id=action.id
             )
 
-        forms = self._expand_forms_with_amendments(args.forms)
+        forms = self._get_forms_for_reports(args.reports)
+        notes_forms = self._get_notes_forms_for_reports(args.reports)
 
-        # Query the company_filings view directly
-        qb = (
-            self.database
-            .table("company_filings")
-            .select(
-                "id,company_id,company_name,company_symbols,company_exchanges,form,items,press_release,"
-                "fiscal_year,fiscal_period,filing_date,report_date,accession_number")
-            .contains("company_symbols", args.symbols)
-            .in_("form", forms)
-            .gte("filing_date", args.start_date)
-            .lte("filing_date", args.end_date or date.today().isoformat())
-        )
+        all_results = []
 
-        if args.include_items:
-            for item_code in args.include_items:
-                qb = qb.contains("items", item_code)
+        filing_chunk_results = await self._search_filing_chunks(args, forms)
+        all_results.extend(filing_chunk_results)
 
-        filings_result = qb.order("filing_date", desc=True).limit(50).execute()
+        notes_results = await self._search_filing_notes(args, notes_forms)
+        all_results.extend(notes_results)
 
-        if not filings_result.data:
-            self.log_done("No filings found")
-            return Message(role="tool", status="completed", content="No filings in the requested range.",
-                           action_id=action.id)
+        pr_chunk_results = await self._search_press_release_chunks(args)
+        all_results.extend(pr_chunk_results)
 
-        content = self._format_filings_to_md(filings=filings_result.data)
+        if not all_results:
+            self.log_done("No matches found")
+            return Message(role="tool", status="completed", content="No matching results found.", action_id=action.id)
 
-        # Build result summary
-        companies = {f['company_name'] for f in filings_result.data if f.get('company_name')}
-        forms = {f['form'] for f in filings_result.data}
-        summary = f"Found {len(filings_result.data)} filings: {', '.join(sorted(forms))}"
-        if len(companies) <= 3:
-            summary += f" ({', '.join(sorted(companies))})"
+        all_results.sort(key=lambda x: x.get('_score', 0), reverse=True)
+        top_results = all_results[:args.limit]
+
+        content = self._format_results(top_results)
+
+        unique_filings = len({r['filing_id'] for r in top_results})
+        summary = f"Found {len(top_results)} result(s) across {unique_filings} filing(s)"
 
         self.log_done(summary)
 
-        return Message(
-            role="tool",
-            status="completed",
-            content=content,
-            action_id=action.id
-        )
+        return Message(role="tool", status="completed", content=content, action_id=action.id)
 
-    def validate(self, action: Action) -> SearchFilings:
+    async def _search_filing_chunks(self, args: SearchFilings, forms: List[str]) -> List[dict]:
+        """Vector search filing chunks using company_filing_chunks view"""
+        try:
+            query = (
+                self.database
+                .table("company_filing_chunks")
+                .select(
+                    "id,filing_id,page,content,index,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", forms)
+                .gte("report_date", args.start_date)
+                .lte("report_date", args.end_date)
+            )
+
+            # Apply has_table filter if specified
+            if args.tables_only is not None:
+                query = query.eq("has_table", args.tables_only)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
+
+            # Add result type marker
+            for r in result.data:
+                r['_type'] = 'filing_chunk'
+
+            return result.data
+        except Exception as e:
+            self.log_error(f"Filing chunks search failed: {e}")
+            return []
+
+    async def _search_filing_notes(self, args: SearchFilings, forms: List[str]) -> List[dict]:
+        """Vector search filing note chunks using company_filing_note_chunks view"""
+        try:
+            query = (
+                self.database
+                .table("company_filing_note_chunks")
+                .select(
+                    "id,filing_id,filing_note_id,index,note_title,note_filename,content,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", forms)
+                .gte("report_date", args.start_date)
+                .lte("report_date", args.end_date)
+            )
+
+            # Apply has_table filter if specified
+            if args.tables_only is not None:
+                query = query.eq("has_table", args.tables_only)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
+
+            # Add result type marker
+            for r in result.data:
+                r['_type'] = 'filing_note_chunk'
+
+            return result.data
+        except Exception as e:
+            self.log_error(f"Filing note chunks search failed: {e}")
+            return []
+
+    async def _search_press_release_chunks(self, args: SearchFilings) -> List[dict]:
+        """Vector search press release chunks using company_press_release_chunks view"""
+        try:
+            query = (
+                self.database
+                .table("company_press_release_chunks")
+                .select(
+                    "id,filing_id,page,content,index,has_table,form,report_date,report_date,company_name,company_symbols")
+                .contains("company_symbols", args.symbol)
+                .in_("form", ['8-K', '8-K/A'])
+                .eq("press_release", True)
+                .gte("report_date", args.start_date)
+                .lte("report_date", args.end_date)
+            )
+
+            # Apply has_table filter if specified
+            if args.tables_only is not None:
+                query = query.eq("has_table", args.tables_only)
+
+            result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
+
+            # Add result type marker
+            for r in result.data:
+                r['_type'] = 'press_release_chunk'
+
+            return result.data
+        except Exception as e:
+            self.log_error(f"Press release chunks search failed: {e}")
+            return []
+
+    @staticmethod
+    def validate(action: Action) -> SearchFilings:
         """Validates the action against the Pydantic schema"""
         try:
             return SearchFilings(**action.body)
-
-        except ValidationError:
-            pass
+        except ValidationError as e:
+            raise RuntimeError(f"Validation failed: {e}") from e
 
     @staticmethod
-    def _format_filings_to_md(filings: List[dict]) -> str:
-        """Formats the filings as a Markdown table"""
+    def _get_forms_for_reports(report_type: str) -> List[str]:
+        """Maps report type to form types with amendments"""
+        mapping = {
+            'annual': ['10-K', '10-K/A', '20-F', '20-F/A', 'DEF 14A', 'DEF 14A/A'],
+            'quarterly': ['10-Q', '10-Q/A'],
+            'current': ['8-K', '8-K/A', '6-K', '6-K/A'],
+            'all': ['10-K', '10-K/A', '10-Q', '10-Q/A', '8-K', '8-K/A', '20-F', '20-F/A', '6-K', '6-K/A',  'DEF 14A', 'DEF 14A/A']
+        }
+        return mapping.get(report_type, [])
 
-        def fmt_items(v):
-            return ",".join(v) if isinstance(v, list) else ""
+    @staticmethod
+    def _get_notes_forms_for_reports(report_type: str) -> List[str]:
+        """Maps report type to note-bearing forms only"""
+        mapping = {
+            'annual': ['10-K', '10-K/A', '20-F', '20-F/A'],
+            'quarterly': ['10-Q', '10-Q/A'],
+            'current': [],
+            'all': ['10-K', '10-K/A', '10-Q', '10-Q/A', '20-F', '20-F/A']
+        }
+        return mapping.get(report_type, [])
 
-        rows = []
-        for f in filings:
-            rows.append({
-                "id": f['id'],
-                "company": f.get('company_name', ''),
-                "symbols": fmt_items(f.get('company_symbols', [])),
-                "exchanges": fmt_items(f.get('company_exchanges', [])),
-                "form": f['form'],
-                "items": f['items'],
-                "press_release": "X" if f['press_release'] else "",
-                "report_date": f['report_date'],
-                "filing_date": f['filing_date'],
-                "fiscal_period": f.get("fiscal_period") or " - ",
-                "fiscal_year": f.get("fiscal_year") or " - ",
-                "accession_no": f['accession_number']
-            })
+    def _format_results(self, results: List[dict]) -> str:
+        """Format all results using type-specific formatters"""
+        output = []
 
-        if not rows:
-            return "No filings in the requested range."
+        for r in results:
+            result_type = r.get('_type')
 
-        df = pd.DataFrame(rows, columns=[
-            "id", "company", "symbols", "exchanges", "form", "items",
-            "press_release", "report_date", "filing_date",
-            "fiscal_period", "fiscal_year", "accession_no",
-        ])
+            if result_type == 'filing_chunk':
+                output.append(self._format_filing_chunk(r))
+            elif result_type == 'filing_note_chunk':
+                output.append(self._format_filing_note_chunk(r))
+            elif result_type == 'press_release_chunk':
+                output.append(self._format_press_release_chunk(r))
 
-        df = df.sort_values(by="filing_date", ascending=False, kind="stable")
+        return "\n".join(output) if output else "No results found."
 
-        return df.to_markdown()
+    @staticmethod
+    def _format_filing_chunk(r: dict) -> str:
+        """Format filing chunk result"""
+        company_name = r.get('company_name', 'Unknown')
+        symbols = ','.join(r.get('company_symbols', []))
+        form = r.get('form', '?')
+        filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
+        fiscal_year = r.get('fiscal_year', '')
+        fiscal_period = r.get('fiscal_period', '')
+        content = (r.get('content') or '').strip()
+        score = r.get('_score', 0.0)
+
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
+
+        return (
+                f"**[Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
+                f"{content}\n\n---\n"
+        )
+
+    @staticmethod
+    def _format_filing_note_chunk(r: dict) -> str:
+        """Format filing note chunk result"""
+        company_name = r.get('company_name', 'Unknown')
+        symbols = ','.join(r.get('company_symbols', []))
+        form = r.get('form', '?')
+        filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
+        fiscal_year = r.get('fiscal_year', '')
+        fiscal_period = r.get('fiscal_period', '')
+        note_title = r.get('note_title', 'Untitled Note')
+        content = (r.get('content') or '').strip()
+        score = r.get('_score', 0.0)
+
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
+
+        return (
+                f"**[Note Chunk #{r['index']}] {note_title}** | Score: {score:.3f} | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
+                f"{content}\n\n---\n"
+        )
+
+    @staticmethod
+    def _format_press_release_chunk(r: dict) -> str:
+        """Format press release chunk result"""
+        company_name = r.get('company_name', 'Unknown')
+        symbols = ','.join(r.get('company_symbols', []))
+        form = r.get('form', '?')
+        filing_date = r.get('filing_date', '?')
+        report_date = r.get('report_date', '?')
+        content = (r.get('content') or '').strip()
+        score = r.get('_score', 0.0)
+
+        return (
+                f"**[Press Release Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}\n\n" +
+                f"{content}\n\n---\n"
+        )

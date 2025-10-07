@@ -1,6 +1,8 @@
 """Append-only vector store for brute-force similarity search."""
 import os
 import json
+import fcntl
+import threading
 import numpy as np
 from pathlib import Path
 from typing import Optional, List, Tuple, Iterable, Set
@@ -22,6 +24,7 @@ class VectorStore:
         self.vec_file = self.base_path.with_suffix('.vec')
         self.id_file = self.base_path.with_suffix('.id')
         self.tomb_file = self.base_path.with_suffix('.tomb.json')
+        self._lock = threading.RLock()
 
         # Create directory and files if missing
         self.vec_file.parent.mkdir(parents=True, exist_ok=True)
@@ -80,38 +83,46 @@ class VectorStore:
         if not ids:
             return
 
-        assert len(ids) == len(vecs), f"ID count {len(ids)} != vector count {len(vecs)}"
+        with self._lock:
+            assert len(ids) == len(vecs), f"ID count {len(ids)} != vector count {len(vecs)}"
 
-        # Normalize all vectors to unit length
-        vecs_array = np.array(vecs, dtype=np.float32)
-        assert vecs_array.shape == (len(vecs), self.dim), f"Expected shape ({len(vecs)}, {self.dim}), got {vecs_array.shape}"
+            # Normalize all vectors to unit length
+            vecs_array = np.array(vecs, dtype=np.float32)
+            assert vecs_array.shape == (len(vecs), self.dim), f"Expected shape ({len(vecs)}, {self.dim}), got {vecs_array.shape}"
 
-        norms = np.linalg.norm(vecs_array, axis=1, keepdims=True)
-        norms[norms == 0] = 1  # Avoid division by zero
-        vecs_array = vecs_array / norms
+            norms = np.linalg.norm(vecs_array, axis=1, keepdims=True)
+            norms[norms == 0] = 1  # Avoid division by zero
+            vecs_array = vecs_array / norms
 
-        # Append vectors
-        with open(self.vec_file, 'ab') as f:
-            vecs_array.tofile(f)
-            f.flush()
-            os.fsync(f.fileno())
+            # Append vectors and IDs with file locks
+            with open(self.vec_file, 'ab') as vf, open(self.id_file, 'ab') as idf:
+                fcntl.flock(vf.fileno(), fcntl.LOCK_EX)
+                fcntl.flock(idf.fileno(), fcntl.LOCK_EX)
 
-        # Append IDs
-        ids_array = np.array(ids, dtype=np.int64)
-        with open(self.id_file, 'ab') as f:
-            ids_array.tofile(f)
-            f.flush()
-            os.fsync(f.fileno())
+                try:
+                    vecs_array.tofile(vf)
+                    vf.flush()
+                    os.fsync(vf.fileno())
+
+                    ids_array = np.array(ids, dtype=np.int64)
+                    ids_array.tofile(idf)
+                    idf.flush()
+                    os.fsync(idf.fileno())
+                finally:
+                    fcntl.flock(vf.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(idf.fileno(), fcntl.LOCK_UN)
 
     def tombstone(self, id_: int):
         """Mark an ID as deleted"""
-        self.tombstones.add(int(id_))
-        self._save_tombstones()
+        with self._lock:
+            self.tombstones.add(int(id_))
+            self._save_tombstones()
 
     def tombstone_batch(self, ids: List[int]):
         """Mark multiple IDs as deleted"""
-        self.tombstones.update(int(x) for x in ids)
-        self._save_tombstones()
+        with self._lock:
+            self.tombstones.update(int(x) for x in ids)
+            self._save_tombstones()
 
     def search(
         self,
@@ -132,39 +143,48 @@ class VectorStore:
         if norm > 0:
             query_vec = query_vec / norm
 
-        # Load vectors and IDs via memmap
-        vectors = np.memmap(self.vec_file, dtype=np.float32, mode='r')
-        total_count = len(vectors) // self.dim
-        if total_count == 0:
-            return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
+        with self._lock:
+            # Load vectors and IDs via memmap (protected by lock to ensure consistency)
+            vectors = np.memmap(self.vec_file, dtype=np.float32, mode='r')
+            total_count = len(vectors) // self.dim
+            if total_count == 0:
+                return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
 
-        vectors = vectors.reshape(total_count, self.dim)
-        ids = np.memmap(self.id_file, dtype=np.int64, mode='r')
+            vectors = vectors.reshape(total_count, self.dim)
+            ids = np.memmap(self.id_file, dtype=np.int64, mode='r')
 
-        # Apply tombstones
-        if self.tombstones:
-            mask = ~np.isin(ids, list(self.tombstones))
-            ids = ids[mask]
-            vectors = vectors[mask]
+            # Ensure lengths match (safety check)
+            id_count = len(ids)
+            if total_count != id_count:
+                # Use the smaller count to avoid index errors
+                count = min(total_count, id_count)
+                vectors = vectors[:count]
+                ids = ids[:count]
 
-        # Apply filter
-        if filter_ids is not None:
-            filter_set = set(int(x) for x in filter_ids)
-            mask = np.isin(ids, list(filter_set))
-            ids = ids[mask]
-            vectors = vectors[mask]
+            # Apply tombstones
+            if self.tombstones:
+                mask = ~np.isin(ids, list(self.tombstones))
+                ids = ids[mask]
+                vectors = vectors[mask]
 
-        if len(ids) == 0:
-            return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
+            # Apply filter
+            if filter_ids is not None:
+                filter_set = set(int(x) for x in filter_ids)
+                mask = np.isin(ids, list(filter_set))
+                ids = ids[mask]
+                vectors = vectors[mask]
 
-        # Compute cosine similarity (dot product of normalized vectors)
-        scores = vectors @ query_vec
+            if len(ids) == 0:
+                return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
 
-        # Get top-k
-        if len(scores) <= topk:
-            idx = np.argsort(scores)[::-1]
-        else:
-            idx = np.argpartition(scores, -topk)[-topk:]
-            idx = idx[np.argsort(scores[idx])[::-1]]
+            # Compute cosine similarity (dot product of normalized vectors)
+            scores = vectors @ query_vec
 
-        return ids[idx], scores[idx]
+            # Get top-k
+            if len(scores) <= topk:
+                idx = np.argsort(scores)[::-1]
+            else:
+                idx = np.argpartition(scores, -topk)[-topk:]
+                idx = idx[np.argsort(scores[idx])[::-1]]
+
+            return ids[idx], scores[idx]
