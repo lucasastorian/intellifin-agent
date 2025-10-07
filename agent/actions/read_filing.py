@@ -8,13 +8,16 @@ class ReadFiling(BaseModel):
     """Read a specific page range from a filing (up to 20 pages).
 
     - Cover page of filing is considered page #1
-    - EDGAR’s internal page references may offset by a few pages
+    - EDGAR's internal page references may offset by a few pages
     - Adjust ranges as needed (e.g., read ToC first, then jump to the target section).
 
     Strategy:
-    - Don’t try to read the entire filings in one call. Generally read ToC first (e.g., first 2–3 pages),
+    - Don't try to read the entire filings in one call. Generally read ToC first (e.g., first 2–3 pages),
       then fetch the specific section you need.
     """
+    thought: str = Field(
+        description="Explain what section or information you're looking for in this filing and why these specific pages"
+    )
     filing_id: int = Field(..., description="Unique filing id returned by SearchFilings.")
     start_page: int = Field(..., ge=1, description="1-based start page.")
     end_page: int = Field(..., ge=1, description="1-based end page (inclusive).")
@@ -35,7 +38,7 @@ class ReadFilingAction(BaseAction):
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
-        self.log_start("ReadFiling", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}")
+        self.log_start("ReadFiling", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}", thought=args.thought)
 
         filing_result = (
             self.database

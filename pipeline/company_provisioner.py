@@ -78,7 +78,8 @@ class CompanyProvisioner:
         return records
 
     def _merge_data(self, csv_data: Dict[str, Dict], sec_data: List[Dict]) -> List[Dict]:
-        records = []
+        # Group SEC records by CIK to aggregate all tickers for the same company
+        cik_map = {}
 
         for sec_record in sec_data:
             ticker = sec_record['ticker']
@@ -87,21 +88,29 @@ class CompanyProvisioner:
             if not csv_record:
                 continue
 
-            records.append({
-                'name': sec_record['name'],
-                'symbols': [ticker],
-                'exchanges': [sec_record['exchange']],
-                'cik': sec_record['cik'],
-                'sic': sec_record['sic'],
-                'sector': csv_record.get('sector'),
-                'industry': csv_record.get('industry'),
-                'market_cap': csv_record.get('market_cap'),
-                'country': csv_record.get('country'),
-                'fiscal_year_end': None,
-                'synced': False,
-            })
+            cik = sec_record['cik']
+            if cik not in cik_map:
+                cik_map[cik] = {
+                    'name': sec_record['name'],
+                    'symbols': [],
+                    'exchanges': [],
+                    'cik': cik,
+                    'sic': sec_record['sic'],
+                    'sector': csv_record.get('sector'),
+                    'industry': csv_record.get('industry'),
+                    'market_cap': csv_record.get('market_cap'),
+                    'country': csv_record.get('country'),
+                    'fiscal_year_end': None,
+                    'synced': False,
+                }
 
-        return records
+            # Add ticker and exchange if not already present
+            if ticker not in cik_map[cik]['symbols']:
+                cik_map[cik]['symbols'].append(ticker)
+            if sec_record['exchange'] not in cik_map[cik]['exchanges']:
+                cik_map[cik]['exchanges'].append(sec_record['exchange'])
+
+        return list(cik_map.values())
 
     @staticmethod
     def _parse_market_cap(value: str) -> Optional[float]:

@@ -65,12 +65,28 @@ class Database:
         """Close the database connection in a thread-safe manner.
 
         Acquires the lock to ensure no queries are in-flight during shutdown.
+        Performs WAL checkpoint to merge WAL file into main database.
         """
         with self._lock:
             if self._closed:
                 return
-            self._closed = True
-            self.conn.close()
+            try:
+                # Checkpoint WAL to merge changes into main database file
+                # TRUNCATE mode removes WAL file after successful checkpoint
+                self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                self.conn.commit()
+            except Exception:
+                # Don't fail close if checkpoint fails
+                pass
+            finally:
+                # Close embedding cache LMDB connection
+                if hasattr(self, 'embedder') and self.embedder and self.embedder.cache:
+                    try:
+                        self.embedder.cache.close()
+                    except Exception:
+                        pass
+                self._closed = True
+                self.conn.close()
 
     def __enter__(self):
         """Context manager entry."""

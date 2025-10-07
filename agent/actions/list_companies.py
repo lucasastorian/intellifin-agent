@@ -13,6 +13,9 @@ class ListCompanies(BaseModel):
     - Performs case-insensitive partial name matching
     - Returns up to 10 results with ticker symbols, industry, sector, and exchanges
     """
+    thought: str = Field(
+        description="Explain why you're searching for this company and what you plan to do with the results"
+    )
     query: str = Field(description="Company name or partial name to search for (e.g., 'Apple', 'Microsoft')")
 
 
@@ -23,17 +26,15 @@ class ListCompaniesAction(BaseAction):
 
     async def call(self, action: Action):
         """Searches companies by name"""
-        self.log_start("ListCompanies")
-
         try:
             args = self.validate(action)
         except RuntimeError as e:
-
+            self.log_start("ListCompanies")
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
         params = f"'{args.query}'"
-        self.log_start("SearchCompanies", params)
+        self.log_start("ListCompanies", params, thought=args.thought)
 
         result = (
             self.database

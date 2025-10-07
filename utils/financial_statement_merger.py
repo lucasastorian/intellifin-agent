@@ -1,7 +1,10 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 import pandas as pd
 from datetime import datetime
 import re
+
+# Regex to detect date range columns like "YYYY-MM-DD - YYYY-MM-DD"
+DATE_COL_RE = re.compile(r"\d{4}-\d{2}-\d{2}\s*-\s*\d{4}-\d{2}-\d{2}")
 
 
 class FinancialStatementMerger:
@@ -20,6 +23,41 @@ class FinancialStatementMerger:
         self.include_segments = include_segments
         self.requested_start_date = requested_start_date
         self.requested_end_date = requested_end_date
+
+    @staticmethod
+    def _first_value_col(cols: List[str]) -> Optional[str]:
+        """Select first valid date-like string column from list.
+
+        Prefers columns matching date range pattern, falls back to first string column.
+        """
+        # Prefer string columns that look like date ranges
+        for c in cols:
+            if isinstance(c, str) and DATE_COL_RE.search(c):
+                return c
+        # Fall back to first string column
+        for c in cols:
+            if isinstance(c, str):
+                return c
+        # Last resort: stringify first col
+        return str(cols[0]) if cols else None
+
+    @staticmethod
+    def _normalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure required columns exist with proper defaults."""
+        defaults = {
+            'axis': '',
+            'member': '',
+            'level': 0,
+            'abstract': False,
+            'dimension': False,
+            'period': ''
+        }
+        for col, default in defaults.items():
+            if col not in df.columns:
+                df[col] = default
+            else:
+                df[col] = df[col].fillna(default)
+        return df
 
     def merge(self) -> pd.DataFrame:
         """Main entry point - merges statements based on report type"""
@@ -112,6 +150,7 @@ class FinancialStatementMerger:
 
                 stmt = quarters[period]
                 df = pd.DataFrame(stmt['data'])
+                df = self._normalize_dataframe_columns(df)
 
                 # Get the value column
                 meta_cols = ['concept', 'label', 'abstract', 'dimension', 'axis', 'member', 'period', 'level']
@@ -121,7 +160,10 @@ class FinancialStatementMerger:
                     normalized.append(stmt)
                     continue
 
-                value_col = value_cols[0]
+                value_col = self._first_value_col(value_cols)
+                if not value_col:
+                    normalized.append(stmt)
+                    continue
 
                 # Parse start date from column name
                 start_date = self._parse_start_date_from_column(value_col)
@@ -173,18 +215,22 @@ class FinancialStatementMerger:
             value_cols = [col for col in df.columns if col not in meta_cols]
 
             if value_cols:
-                return self._parse_start_date_from_column(value_cols[0])
+                value_col = self._first_value_col(value_cols)
+                if value_col:
+                    return self._parse_start_date_from_column(value_col)
 
         return None
 
-    def _parse_start_date_from_column(self, column_name: str) -> Optional[datetime]:
+    def _parse_start_date_from_column(self, column_name) -> Optional[datetime]:
         """Parse start date from column name like '2024-09-29 - 2025-06-28 (Q3 2025)'"""
+        if not isinstance(column_name, str):
+            return None
         try:
             if ' - ' in column_name:
                 date_part = column_name.split('(')[0].strip() if '(' in column_name else column_name
                 start_str = date_part.split(' - ')[0].strip()
                 return datetime.strptime(start_str, '%Y-%m-%d')
-        except:
+        except Exception:
             pass
         return None
 
@@ -193,17 +239,14 @@ class FinancialStatementMerger:
         ytd_df = pd.DataFrame(ytd_stmt['data'])
         prior_df = pd.DataFrame(prior_stmt['data'])
 
+        # Normalize columns first
+        ytd_df = self._normalize_dataframe_columns(ytd_df)
+        prior_df = self._normalize_dataframe_columns(prior_df)
+
         # Filter by include_segments
         if not self.include_segments:
             ytd_df = ytd_df[ytd_df['dimension'] == False].copy()
             prior_df = prior_df[prior_df['dimension'] == False].copy()
-
-        # Ensure axis and member columns exist
-        for df in [ytd_df, prior_df]:
-            if 'axis' not in df.columns:
-                df['axis'] = ''
-            if 'member' not in df.columns:
-                df['member'] = ''
 
         # Create merge keys
         ytd_df['_merge_key'] = ytd_df.apply(
@@ -217,8 +260,15 @@ class FinancialStatementMerger:
 
         # Get value columns
         meta_cols = ['concept', 'label', 'abstract', 'dimension', 'axis', 'member', 'period', 'level', '_merge_key']
-        ytd_value_col = [col for col in ytd_df.columns if col not in meta_cols][0]
-        prior_value_col = [col for col in prior_df.columns if col not in meta_cols][0]
+        ytd_value_cols = [col for col in ytd_df.columns if col not in meta_cols]
+        prior_value_cols = [col for col in prior_df.columns if col not in meta_cols]
+
+        ytd_value_col = self._first_value_col(ytd_value_cols)
+        prior_value_col = self._first_value_col(prior_value_cols)
+
+        if not ytd_value_col or not prior_value_col:
+            # Can't subtract without value columns
+            return ytd_stmt
 
         # Merge
         merged = ytd_df.merge(
@@ -285,19 +335,18 @@ class FinancialStatementMerger:
             q2_df = pd.DataFrame(q2_stmt['data'])
             q3_df = pd.DataFrame(q3_stmt['data'])
 
+            # Normalize columns first
+            annual_df = self._normalize_dataframe_columns(annual_df)
+            q1_df = self._normalize_dataframe_columns(q1_df)
+            q2_df = self._normalize_dataframe_columns(q2_df)
+            q3_df = self._normalize_dataframe_columns(q3_df)
+
             # Filter by include_segments
             if not self.include_segments:
                 annual_df = annual_df[annual_df['dimension'] == False].copy()
                 q1_df = q1_df[q1_df['dimension'] == False].copy()
                 q2_df = q2_df[q2_df['dimension'] == False].copy()
                 q3_df = q3_df[q3_df['dimension'] == False].copy()
-
-            # Ensure axis and member columns exist
-            for df in [annual_df, q1_df, q2_df, q3_df]:
-                if 'axis' not in df.columns:
-                    df['axis'] = ''
-                if 'member' not in df.columns:
-                    df['member'] = ''
 
             # Create merge keys for each dataframe
             for df in [annual_df, q1_df, q2_df, q3_df]:
@@ -314,10 +363,19 @@ class FinancialStatementMerger:
             # Find value columns (exclude metadata columns)
             meta_cols = ['concept', 'label', 'abstract', 'dimension', 'axis', 'member', 'period', 'level', '_merge_key']
 
-            annual_value_col = [col for col in annual_df.columns if col not in meta_cols][0]
-            q1_value_col = [col for col in q1_df.columns if col not in meta_cols][0]
-            q2_value_col = [col for col in q2_df.columns if col not in meta_cols][0]
-            q3_value_col = [col for col in q3_df.columns if col not in meta_cols][0]
+            annual_value_cols = [col for col in annual_df.columns if col not in meta_cols]
+            q1_value_cols = [col for col in q1_df.columns if col not in meta_cols]
+            q2_value_cols = [col for col in q2_df.columns if col not in meta_cols]
+            q3_value_cols = [col for col in q3_df.columns if col not in meta_cols]
+
+            annual_value_col = self._first_value_col(annual_value_cols)
+            q1_value_col = self._first_value_col(q1_value_cols)
+            q2_value_col = self._first_value_col(q2_value_cols)
+            q3_value_col = self._first_value_col(q3_value_cols)
+
+            if not all([annual_value_col, q1_value_col, q2_value_col, q3_value_col]):
+                # Missing value columns, can't infer Q4
+                return None
 
             # Merge all dataframes on merge key
             merged = annual_df[[
@@ -407,15 +465,10 @@ class FinancialStatementMerger:
         for stmt in statements:
             data = stmt['data']
             df = pd.DataFrame(data)
+            df = self._normalize_dataframe_columns(df)
 
             if not self.include_segments:
-                df = df[~df['dimension']].copy()
-
-            # Ensure axis and member columns exist
-            if 'axis' not in df.columns:
-                df['axis'] = ''
-            if 'member' not in df.columns:
-                df['member'] = ''
+                df = df[df['dimension'] == False].copy()
 
             df['_merge_key'] = df.apply(
                 lambda row: (row['concept'], row['dimension'], row.get('axis', ''), row.get('member', '')),
@@ -430,10 +483,12 @@ class FinancialStatementMerger:
                          col not in ['concept', 'label', 'abstract', 'dimension', 'axis', 'member', 'period', 'level',
                                      '_merge_key']]
             if date_cols:
-                df = df[['_merge_key', 'concept', 'label', 'level', 'dimension', 'axis', 'member'] + date_cols].copy()
-                df.rename(columns={date_cols[0]: period_label}, inplace=True)
-                dfs.append(df)
-                period_labels.append(period_label)
+                value_col = self._first_value_col(date_cols)
+                if value_col:
+                    df = df[['_merge_key', 'concept', 'label', 'level', 'dimension', 'axis', 'member', value_col]].copy()
+                    df.rename(columns={value_col: period_label}, inplace=True)
+                    dfs.append(df)
+                    period_labels.append(period_label)
 
         if not dfs:
             return pd.DataFrame()
@@ -448,11 +503,21 @@ class FinancialStatementMerger:
         merged = dfs[0][['_merge_key', 'concept', 'label', 'level', 'dimension', 'axis', 'member']].copy()
         for i, df in enumerate(dfs):
             period_col = period_labels[i]
+
+            # Merge with full metadata to avoid NaN pollution when new concepts appear
             merged = merged.merge(
-                df[['_merge_key', period_col]],
+                df[['_merge_key', 'concept', 'label', 'level', 'dimension', 'axis', 'member', period_col]],
                 on='_merge_key',
-                how='outer'
+                how='outer',
+                suffixes=('', '_new')
             )
+
+            # Coalesce metadata: use original values, fill missing with new values
+            for col in ['concept', 'label', 'level', 'dimension', 'axis', 'member']:
+                if f'{col}_new' in merged.columns:
+                    # Use combine_first to avoid FutureWarning about downcasting
+                    merged[col] = merged[col].combine_first(merged[f'{col}_new'])
+                    merged.drop(columns=[f'{col}_new'], inplace=True)
 
         merged['_order'] = merged['_merge_key'].map({k: i for i, k in enumerate(merge_key_order)})
         merged = merged.sort_values('_order').drop(columns=['_order', '_merge_key']).reset_index(drop=True)

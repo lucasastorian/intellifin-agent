@@ -2,6 +2,7 @@ from typing import Literal, Optional
 from datetime import date, timedelta
 from pydantic import BaseModel, Field, ValidationError, field_validator
 import pandas as pd
+import traceback
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
@@ -16,6 +17,9 @@ class ViewFinancialStatements(BaseModel):
 
     - Filters out segment/dimensional data (dimension=False only) unless include_segments=True
     """
+    thought: str = Field(
+        description="Explain what financial metrics or trends you're analyzing and why"
+    )
     symbol: str = Field(description="The ticker symbol of the company")
     statement_type: Literal['income_statement', 'balance_sheet', 'cash_flow'] = Field(
         description="Type of financial statement to view")
@@ -59,9 +63,17 @@ class ViewFinancialStatementsAction(BaseAction):
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
         params = f"{args.symbol} {args.statement_type} ({args.report_type}), {args.start_date} → {args.end_date}"
-        self.log_start("ViewFinancialStatements", params)
+        self.log_start("ViewFinancialStatements", params, thought=args.thought)
 
-        not_found = self.sync_symbols(symbols=[args.symbol])
+        if args.report_type == 'quarterly':
+            load_start_date = (date.fromisoformat(args.start_date) - timedelta(days=365)).isoformat()
+            forms = ['10-Q', '10-Q/A', '10-K', '10-K/A', '20-F', '20-F/A']
+        else:
+            load_start_date = args.start_date
+            forms = ['10-K', '10-K/A', '20-F', '20-F/A']
+
+        not_found = self.sync_symbols(symbols=[args.symbol], forms=forms,
+                                       start_date=load_start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return Message(
@@ -71,13 +83,6 @@ class ViewFinancialStatementsAction(BaseAction):
                 error=True,
                 action_id=action.id
             )
-
-        if args.report_type == 'quarterly':
-            load_start_date = (date.fromisoformat(args.start_date) - timedelta(days=365)).isoformat()
-            forms = ['10-Q', '10-Q/A', '10-K', '10-K/A', '20-F', '20-F/A']
-        else:
-            load_start_date = args.start_date
-            forms = ['10-K', '10-K/A', '20-F', '20-F/A']
 
         try:
             result = (
@@ -129,11 +134,12 @@ class ViewFinancialStatementsAction(BaseAction):
             return Message(role="tool", status="completed", content=content, action_id=action.id)
 
         except Exception as e:
-            self.log_error(f"Failed to load statements: {e}")
+            tb = traceback.format_exc()
+            self.log_error(f"Failed to load statements: {e}\n{tb}")
             return Message(
                 role="tool",
                 status="completed",
-                content=f"Error loading financial statements: {str(e)}",
+                content=f"Error loading financial statements: {str(e)}\n\n```\n{tb}\n```",
                 error=True,
                 action_id=action.id
             )
@@ -141,6 +147,24 @@ class ViewFinancialStatementsAction(BaseAction):
     def _format_as_markdown(self, df: pd.DataFrame, symbol: str, statement_type: str, report_type: str) -> str:
         """Format merged DataFrame as markdown table with formatted values"""
         title = f"# {symbol} - {statement_type.replace('_', ' ').title()} ({report_type.capitalize()})\n\n"
+
+        # Normalize columns with defaults
+        if 'axis' not in df.columns:
+            df['axis'] = ''
+        if 'dimension' not in df.columns:
+            df['dimension'] = False
+        if 'level' not in df.columns:
+            df['level'] = 0
+        if 'label' not in df.columns:
+            df['label'] = df['concept']  # Fallback to concept if label missing
+
+        # Ensure proper types - use astype with copy=False to avoid FutureWarning
+        df['axis'] = df['axis'].fillna('').astype(str)
+        df['label'] = df['label'].fillna('').astype(str)
+        df['level'] = df['level'].fillna(0).astype(int)
+
+        # Handle dimension separately to avoid downcasting warning
+        df['dimension'] = df['dimension'].apply(lambda x: bool(x) if pd.notna(x) else False)
 
         # Get period columns (exclude metadata)
         meta_cols = ['concept', 'label', 'level', 'axis', 'dimension', 'member']
@@ -160,7 +184,7 @@ class ViewFinancialStatementsAction(BaseAction):
 
         for idx, row in display_df.iterrows():
             # Check if we're starting a new parent concept (dimension=False, level=0)
-            if not row['dimension'] and row['level'] == 0:
+            if row['dimension'] == False and row['level'] == 0:
                 current_concept = row['label']
                 current_axis = None
                 # Add parent row with indentation
@@ -168,7 +192,7 @@ class ViewFinancialStatementsAction(BaseAction):
                 output_rows.append([label] + [row[col] for col in period_cols])
 
             # Check if we're in a dimensional fact (dimension=True)
-            elif row['dimension']:
+            elif row['dimension'] == True:
                 axis = row.get('axis', '')
 
                 # If axis changed, insert axis group header
@@ -196,8 +220,12 @@ class ViewFinancialStatementsAction(BaseAction):
         return title + markdown
 
     @staticmethod
-    def _get_axis_label(axis: str) -> str:
+    def _get_axis_label(axis) -> str:
         """Map axis identifier to friendly label"""
+        # Handle non-string axis values (floats, NaN, etc.)
+        if not isinstance(axis, str):
+            return str(axis) if axis and str(axis) != 'nan' else ''
+
         axis_map = {
             'srt:ProductOrServiceAxis': 'Product/Service Breakdown',
             'us-gaap:StatementBusinessSegmentsAxis': 'Business Segment Breakdown',

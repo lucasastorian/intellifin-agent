@@ -14,7 +14,7 @@ class ListFilings(BaseModel):
 
     - Use this first to identify filings before reading or searching text via SearchContent
     - Returns a Markdown table with: id, company name, ticker symbol(s), exchange(s), form, items (for 8-K), press release (X),
-        report_date, filing_date, fiscal_period, fiscal_year.
+        pages, attachments, report_date, filing_date, fiscal_period, fiscal_year.
     - Results sorted by filing_date in descending order
     - For each form - will return both original submissions and amendments where applicable.
     - The fiscal period (Q1/Q2/Q3/FY) and fiscal year returned in the table are from the companies' own fiscal calendar
@@ -86,7 +86,8 @@ class ListFilingsAction(BaseAction):
 
         self.log_start("ListFilings", params=params, thought=args.thought)
 
-        not_found = self.sync_symbols(symbols=args.symbols)
+        not_found = self.sync_symbols(symbols=args.symbols, forms=args.forms,
+                                       start_date=args.start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbols not found: {', '.join(sorted(not_found))}")
             return Message(
@@ -105,7 +106,7 @@ class ListFilingsAction(BaseAction):
             .table("company_filings")
             .select(
                 "id,company_id,company_name,company_symbols,company_exchanges,form,items,press_release,"
-                "fiscal_year,fiscal_period,filing_date,report_date,accession_number")
+                "fiscal_year,fiscal_period,filing_date,report_date,accession_number,num_pages,num_attachments")
             .contains("company_symbols", args.symbols)
             .in_("form", forms)
             .gte("report_date", args.start_date)
@@ -123,7 +124,20 @@ class ListFilingsAction(BaseAction):
             return Message(role="tool", status="completed", content="No filings in the requested range.",
                            action_id=action.id)
 
-        content = self._format_filings_to_md(filings=filings_result.data)
+        # Get company information for the header
+        company_ids = {f['company_id'] for f in filings_result.data if f.get('company_id')}
+        company_info = {}
+        if company_ids:
+            companies_result = (
+                self.database
+                .table("companies")
+                .select("id,name,symbols,sector,industry,fiscal_year_end")
+                .in_("id", list(company_ids))
+                .execute()
+            )
+            company_info = {c['id']: c for c in companies_result.data}
+
+        content = self._format_filings_to_md(filings=filings_result.data, company_info=company_info)
 
         # Build result summary
         companies = {f['company_name'] for f in filings_result.data if f.get('company_name')}
@@ -150,11 +164,40 @@ class ListFilingsAction(BaseAction):
             pass
 
     @staticmethod
-    def _format_filings_to_md(filings: List[dict]) -> str:
-        """Formats the filings as a Markdown table"""
+    def _format_filings_to_md(filings: List[dict], company_info: dict = None) -> str:
+        """Formats the filings as a Markdown table with optional company header"""
 
         def fmt_items(v):
             return ",".join(v) if isinstance(v, list) else ""
+
+        def fmt_fiscal_year_end(fye):
+            """Format fiscal year end (MMDD format) to human-readable"""
+            if not fye or fye == 'N/A':
+                return 'N/A'
+            try:
+                # Handle MMDD format (e.g., "1231" -> "December 31")
+                if len(fye) == 4 and fye.isdigit():
+                    month = int(fye[:2])
+                    day = int(fye[2:])
+                    month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                                   'July', 'August', 'September', 'October', 'November', 'December']
+                    return f"{month_names[month]} {day}"
+                return fye
+            except (ValueError, IndexError):
+                return fye
+
+        # Build company header if we have company info
+        header = ""
+        if company_info:
+            for company_id, info in company_info.items():
+                symbols = fmt_items(info.get('symbols', []))
+                name = info.get('name', 'N/A')
+                sector = info.get('sector') or 'N/A'
+                industry = info.get('industry') or 'N/A'
+                fiscal_year_end = fmt_fiscal_year_end(info.get('fiscal_year_end'))
+
+                header += f"**{name}** ({symbols})\n"
+                header += f"Sector: {sector} | Industry: {industry} | Fiscal Year End: {fiscal_year_end}\n\n"
 
         rows = []
         for f in filings:
@@ -166,6 +209,8 @@ class ListFilingsAction(BaseAction):
                 "form": f['form'],
                 "items": f['items'],
                 "press_release": "X" if f['press_release'] else "",
+                "pages": f.get('num_pages') or "",
+                "attachments": f.get('num_attachments') or "",
                 "report_date": f['report_date'],
                 "filing_date": f['filing_date'],
                 "fiscal_period": f.get("fiscal_period") or " - ",
@@ -178,10 +223,10 @@ class ListFilingsAction(BaseAction):
 
         df = pd.DataFrame(rows, columns=[
             "id", "company", "symbols", "exchanges", "form", "items",
-            "press_release", "report_date", "filing_date",
+            "press_release", "pages", "attachments", "report_date", "filing_date",
             "fiscal_period", "fiscal_year", "accession_no",
         ])
 
         df = df.sort_values(by="filing_date", ascending=False, kind="stable")
 
-        return df.to_markdown()
+        return header + df.to_markdown()

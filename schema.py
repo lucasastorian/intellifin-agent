@@ -36,6 +36,9 @@ class Filings(Table):
     filing_date = Date(nullable=False)
     report_date = Date(nullable=True)
     accession_number = Text(nullable=False, unique=True, index=True)
+    num_pages = Integer(nullable=True)
+    num_attachments = Integer(nullable=True)
+    synced = Boolean(default=False, nullable=False, index=True)
 
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
 
@@ -57,6 +60,8 @@ class CompanyFilings(View):
     filing_date = Field(table="filings", field="filing_date")
     report_date = Field(table="filings", field="report_date")
     accession_number = Field(table="filings", field="accession_number")
+    num_pages = Field(table="filings", field="num_pages")
+    num_attachments = Field(table="filings", field="num_attachments")
 
     company_id = Field(table="filings", field="company_id")
     company_name = Field(table="companies", field="name")
@@ -385,6 +390,152 @@ class CompanyFinancialStatements(View):
     company_cik = Field(table="companies", field="cik")
 
 
+class FilingAttachments(Table):
+    __tablename__ = "filing_attachments"
+
+    id = Serial()
+
+    exhibit_number = Text(nullable=False, index=True)
+    filename = Text(nullable=False)
+    description = Text(nullable=True)
+    num_pages = Integer(nullable=True)
+
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_id", "exhibit_number")]
+
+
+class FilingAttachmentPages(Table):
+    __tablename__ = "filing_attachment_pages"
+
+    id = Serial()
+    page = Integer(nullable=False, index=True)
+    content = Text(nullable=False, fts=True)
+
+    attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("attachment_id", "page")]
+
+
+class FilingAttachmentChunks(Table):
+    __tablename__ = "filing_attachment_chunks"
+
+    id = Serial()
+    index = Integer(nullable=False)
+    page = Integer(nullable=False)
+    content = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(nullable=False, default=False, index=True)
+
+    attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("attachment_id", "index")]
+
+
+class CompanyFilingAttachments(View):
+    __viewname__ = "company_filing_attachments"
+    __tables__ = (FilingAttachments, Filings, Companies)
+
+    id = Field(table="filing_attachments", field="id")
+    exhibit_number = Field(table="filing_attachments", field="exhibit_number")
+    filename = Field(table="filing_attachments", field="filename")
+    description = Field(table="filing_attachments", field="description")
+
+    filing_id = Field(table="filing_attachments", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_attachments", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
+class CompanyFilingAttachmentPages(View):
+    __viewname__ = "company_filing_attachment_pages"
+    __tables__ = (FilingAttachmentPages, FilingAttachments, Filings, Companies)
+
+    id = Field(table="filing_attachment_pages", field="id")
+    page = Field(table="filing_attachment_pages", field="page")
+    content = Field(table="filing_attachment_pages", field="content")
+
+    attachment_id = Field(table="filing_attachment_pages", field="attachment_id")
+    exhibit_number = Field(table="filing_attachments", field="exhibit_number")
+    attachment_filename = Field(table="filing_attachments", field="filename")
+    attachment_description = Field(table="filing_attachments", field="description")
+
+    filing_id = Field(table="filing_attachment_pages", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_attachment_pages", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
+class CompanyFilingAttachmentChunks(View):
+    __viewname__ = "company_filing_attachment_chunks"
+    __tables__ = (FilingAttachmentChunks, FilingAttachments, Filings, Companies)
+
+    id = Field(table="filing_attachment_chunks", field="id")
+    index = Field(table="filing_attachment_chunks", field="index")
+    page = Field(table="filing_attachment_chunks", field="page")
+    content = Field(table="filing_attachment_chunks", field="content")
+    has_table = Field(table="filing_attachment_chunks", field="has_table")
+
+    attachment_id = Field(table="filing_attachment_chunks", field="attachment_id")
+    exhibit_number = Field(table="filing_attachments", field="exhibit_number")
+    attachment_filename = Field(table="filing_attachments", field="filename")
+    attachment_description = Field(table="filing_attachments", field="description")
+
+    filing_id = Field(table="filing_attachment_chunks", field="filing_id")
+    form = Field(table="filings", field="form")
+    amendment = Field(table="filings", field="amendment")
+    items = Field(table="filings", field="items")
+    fiscal_year = Field(table="filings", field="fiscal_year")
+    fiscal_period = Field(table="filings", field="fiscal_period")
+    filing_date = Field(table="filings", field="filing_date")
+    report_date = Field(table="filings", field="report_date")
+    accession_number = Field(table="filings", field="accession_number")
+
+    company_id = Field(table="filing_attachment_chunks", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
 schema = Schema()
 schema.add_table(Companies)
 schema.add_table(Filings)
@@ -392,6 +543,9 @@ schema.add_table(FinancialStatements)
 schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
 schema.add_table(PressReleasePages)
+schema.add_table(FilingAttachments)
+schema.add_table(FilingAttachmentPages)
+schema.add_table(FilingAttachmentChunks)
 schema.add_table(FilingChunks)
 schema.add_table(PressReleaseChunks)
 schema.add_table(FilingNoteChunks)
@@ -404,3 +558,6 @@ schema.add_view(CompanyFilingChunks)
 schema.add_view(CompanyPressReleaseChunks)
 schema.add_view(CompanyFilingPressReleases)
 schema.add_view(CompanyFinancialStatements)
+schema.add_view(CompanyFilingAttachments)
+schema.add_view(CompanyFilingAttachmentPages)
+schema.add_view(CompanyFilingAttachmentChunks)

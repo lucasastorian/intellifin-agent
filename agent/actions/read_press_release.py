@@ -10,6 +10,9 @@ class ReadPressRelease(BaseModel):
 
     - Limited to up to 10 pages at a time
     """
+    thought: str = Field(
+        description="Explain what information you're looking for in this press release and why these specific pages"
+    )
     filing_id: int = Field(..., description="Unique id for an 8-K filing with a item 9.01 (press release)")
     start_page: int = Field(description="The start page ", ge=1)
     end_page: int = Field(description="The end page", ge=1)
@@ -29,7 +32,7 @@ class ReadPressReleaseAction(BaseAction):
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
-        self.log_start("ReadPressRelease", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}")
+        self.log_start("ReadPressRelease", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}", thought=args.thought)
 
         # Get filing metadata
         filing_result = (

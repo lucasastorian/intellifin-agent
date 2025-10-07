@@ -69,15 +69,23 @@ class SelectBuilder(PredMixin, SelectMixin):
     def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
         """Vector similarity search using brute-force cosine similarity.
 
+        Results are automatically ordered by similarity score (descending) using SQL CASE ORDER BY.
+        Scores are attached to each result row as '_score' field.
+
         Args:
             query: Query text to embed and search
             column: Column name (must have associated vector store)
-            topk: Number of results to return
+            topk: Number of results to return from vector search
             embedder: Embedder instance (if None, uses db.embedder)
-            return_scores: If True, execute() will return (rows, scores) tuple
+            return_scores: If True, _score field is guaranteed present (deprecated - always True)
 
         Returns:
             self (for chaining .select().execute())
+
+        Note:
+            - Any WHERE predicates added before vector_search() filter the candidate set
+            - Results are ordered by similarity score, not by any subsequent .order() calls
+            - Use .limit() to further restrict results beyond topk
         """
         if embedder is None:
             embedder = getattr(self.db, 'embedder', None)
@@ -124,20 +132,48 @@ class SelectBuilder(PredMixin, SelectMixin):
         # Search vector store
         ids, scores = vector_store.search(query_vec, topk=topk, filter_ids=filter_ids)
 
-        # Store scores for later retrieval if requested
-        self._vector_scores = dict(zip(ids.tolist(), scores.tolist())) if return_scores else None
+        # Store scores for later retrieval (always store, not just when return_scores=True)
+        self._vector_scores = dict(zip(ids.tolist(), scores.tolist()))
+        self._return_scores = return_scores
 
-        # Filter by returned IDs
+        # Filter by returned IDs and preserve ranking with SQL ORDER BY
         if len(ids) == 0:
             # No results - add impossible predicate
             self._pred = None
             self.in_("id", [])
+            self.order_by = []
         else:
             # Reset predicate and filter by vector search results
             self._pred = None
             self.in_("id", ids.tolist())
 
+            # Build CASE ORDER BY to preserve vector ranking
+            # CASE id WHEN <id1> THEN 0 WHEN <id2> THEN 1 ... END
+            # Lower rank = better match (ASC order)
+            order_cases = " ".join(
+                f"WHEN {int(id_)} THEN {rank}"
+                for rank, id_ in enumerate(ids.tolist())
+            )
+            # order_by expects list of tuples: (expression, desc_bool)
+            self.order_by = [(f"CASE id {order_cases} END", False)]  # False = ASC
+
         return self
+
+    def count(self) -> int:
+        """Execute COUNT(*) query and return the integer count directly."""
+        ir = SelectIR(
+            table=self.table,
+            columns=["COUNT(*) as count"],
+            where=self._pred,
+            order=[],
+            limit=None,
+        )
+        bound = bind_select(ir, self.schema)
+        planned, _ = plan_select(bound, self.schema, self.dialect)
+        sql, params = generate_select(planned, self.dialect)
+        rows = self.db._exec(sql, params)
+
+        return rows[0]['count'] if rows else 0
 
     def execute(self):
         """Execute the SELECT query."""

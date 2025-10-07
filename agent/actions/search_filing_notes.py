@@ -7,18 +7,18 @@ from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
 
 
-class SearchFilings(BaseModel):
-    """Vector search across main filing body content (MD&A, risk factors, business sections, legal matters)
+class SearchFilingNotes(BaseModel):
+    """Search financial statement footnotes (10-K, 10-Q, 20-F notes only)
 
-    Use for: Business narrative, strategy, operations, qualitative discussion, regulatory matters
-    Content: MD&A, Risk Factors, Business Description, Legal Proceedings, Controls
-    Forms: 10-K, 10-Q, 20-F, 8-K, 6-K (main filing body only)
+    Use for: Segment breakdowns, detailed schedules, accounting policies, supplementary financial data
+    Content: Segment reporting, debt/lease schedules, equity details, tax provisions, acquisition details
+    Forms: 10-K, 10-Q, 20-F notes only (8-K/6-K do NOT contain financial statement notes)
 
-    NOT for: Financial footnotes (use SearchFilingNotes) or earnings releases (use SearchPressReleases)
+    NOT for: Earnings releases (use SearchPressReleases) or main filing narrative (use SearchFilings)
 
-    Query tips: Describe WHAT you need and WHERE it appears
-    - Good: "Description of AI infrastructure investments and capex plans in MD&A"
-    - Bad: "AI investments"
+    Query tips: Describe the table/schedule structure and what categories you expect
+    - Good: "Table showing segment revenue by product category including iPhone, Mac, iPad, Services"
+    - Bad: "segment revenue"
     """
     thought: str = Field(
         description="Describe what you're searching for and how it will help you achieve your objective"
@@ -32,9 +32,9 @@ class SearchFilings(BaseModel):
         default=None,
         description="The optional end date to filter. If not specified, will search up until today."
     )
-    reports: Literal['annual', 'quarterly', 'current', 'all'] = Field(
+    reports: Literal['annual', 'quarterly', 'all'] = Field(
         default="all",
-        description="Whether to search annual (20-F/10-K/DEF 14A), quarterly (10-Q), current reports (8-K/6-K), or ALL."
+        description="Whether to search annual (20-F/10-K) or quarterly (10-Q) notes, or ALL. Note: 8-K/6-K do not contain financial statement notes."
     )
     tables_only: Optional[bool] = Field(
         default=None,
@@ -62,23 +62,23 @@ class SearchFilings(BaseModel):
         return v
 
 
-class SearchFilingsAction(BaseAction):
-    name: str = 'SearchFilings'
-    schema = SearchFilings
+class SearchFilingNotesAction(BaseAction):
+    name: str = 'SearchFilingNotes'
+    schema = SearchFilingNotes
 
     async def call(self, action: Action):
-        """Semantic search across filing chunks"""
+        """Semantic search across filing note chunks"""
         try:
             args = self.validate(action)
         except RuntimeError as e:
-            self.log_start("SearchFilings")
+            self.log_start("SearchFilingNotes")
             self.log_error(f"Validation failed: {e}")
             return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
 
-        params = f"'{args.query}' in {args.symbol} {args.reports}, {args.start_date} → {args.end_date}"
-        self.log_start("SearchFilings", params=params, thought=args.thought)
+        params = f"'{args.query}' in {args.symbol} {args.reports} notes, {args.start_date} � {args.end_date}"
+        self.log_start("SearchFilingNotes", params=params, thought=args.thought)
 
-        forms = self._get_forms_for_reports(args.reports)
+        forms = self._get_notes_forms_for_reports(args.reports)
         not_found = self.sync_symbols(symbols=[args.symbol], forms=forms,
                                        start_date=args.start_date, end_date=args.end_date)
         if not_found:
@@ -90,7 +90,7 @@ class SearchFilingsAction(BaseAction):
                 error=True,
                 action_id=action.id
             )
-        results = await self._search_filing_chunks(args, forms)
+        results = await self._search_filing_notes(args, forms)
 
         if not results:
             self.log_done("No matches found")
@@ -108,51 +108,48 @@ class SearchFilingsAction(BaseAction):
 
         return Message(role="tool", status="completed", content=content, action_id=action.id)
 
-    async def _search_filing_chunks(self, args: SearchFilings, forms: List[str]) -> List[dict]:
-        """Vector search filing chunks using company_filing_chunks view"""
+    async def _search_filing_notes(self, args: SearchFilingNotes, forms: List[str]) -> List[dict]:
+        """Vector search filing note chunks using company_filing_note_chunks view"""
         try:
             query = (
                 self.database
-                .table("company_filing_chunks")
+                .table("company_filing_note_chunks")
                 .select(
-                    "id,filing_id,page,content,index,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
+                    "id,filing_id,filing_note_id,index,note_title,note_filename,content,has_table,form,filing_date,report_date,fiscal_year,fiscal_period,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
                 .gte("report_date", args.start_date)
                 .lte("report_date", args.end_date)
             )
 
-            # Apply has_table filter if specified
             if args.tables_only is not None:
                 query = query.eq("has_table", args.tables_only)
 
             result = query.vector_search(args.query, "content", topk=args.limit * 2, return_scores=True).execute()
 
-            # Add result type marker
             for r in result.data:
-                r['_type'] = 'filing_chunk'
+                r['_type'] = 'filing_note_chunk'
 
             return result.data
         except Exception as e:
-            self.log_error(f"Filing chunks search failed: {e}\n{traceback.format_exc()}")
+            self.log_error(f"Filing note chunks search failed: {e}\n{traceback.format_exc()}")
             return []
 
     @staticmethod
-    def validate(action: Action) -> SearchFilings:
+    def validate(action: Action) -> SearchFilingNotes:
         """Validates the action against the Pydantic schema"""
         try:
-            return SearchFilings(**action.body)
+            return SearchFilingNotes(**action.body)
         except ValidationError as e:
             raise RuntimeError(f"Validation failed: {e}") from e
 
     @staticmethod
-    def _get_forms_for_reports(report_type: str) -> List[str]:
-        """Maps report type to form types with amendments"""
+    def _get_notes_forms_for_reports(report_type: str) -> List[str]:
+        """Maps report type to note-bearing forms only"""
         mapping = {
-            'annual': ['10-K', '10-K/A', '20-F', '20-F/A', 'DEF 14A', 'DEF 14A/A'],
+            'annual': ['10-K', '10-K/A', '20-F', '20-F/A'],
             'quarterly': ['10-Q', '10-Q/A'],
-            'current': ['8-K', '8-K/A', '6-K', '6-K/A'],
-            'all': ['10-K', '10-K/A', '10-Q', '10-Q/A', '8-K', '8-K/A', '20-F', '20-F/A', '6-K', '6-K/A', 'DEF 14A', 'DEF 14A/A']
+            'all': ['10-K', '10-K/A', '10-Q', '10-Q/A', '20-F', '20-F/A']
         }
         return mapping.get(report_type, [])
 
@@ -160,12 +157,12 @@ class SearchFilingsAction(BaseAction):
         """Format all results"""
         output = []
         for r in results:
-            output.append(self._format_filing_chunk(r))
+            output.append(self._format_filing_note_chunk(r))
         return "\n".join(output) if output else "No results found."
 
     @staticmethod
-    def _format_filing_chunk(r: dict) -> str:
-        """Format filing chunk result"""
+    def _format_filing_note_chunk(r: dict) -> str:
+        """Format filing note chunk result"""
         company_name = r.get('company_name', 'Unknown')
         symbols = ','.join(r.get('company_symbols', []))
         form = r.get('form', '?')
@@ -173,6 +170,7 @@ class SearchFilingsAction(BaseAction):
         report_date = r.get('report_date', '?')
         fiscal_year = r.get('fiscal_year', '')
         fiscal_period = r.get('fiscal_period', '')
+        note_title = r.get('note_title', 'Untitled Note')
         content = (r.get('content') or '').strip()
         score = r.get('_score', 0.0)
 
@@ -180,7 +178,7 @@ class SearchFilingsAction(BaseAction):
             f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-                f"**[Chunk #{r['index']}] Filing #{r['filing_id']} - Page {r['page']}** | Score: {score:.3f} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                f"**[Note Chunk #{r['index']}] {note_title}** | Score: {score:.3f} | Filing #{r['filing_id']} | {company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
                 f"{content}\n\n---\n"
         )

@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
@@ -22,10 +23,13 @@ class FilingTwentyF(BaseFiling):
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
-    def _upsert_filing(self, xbrl: XBRL) -> int:
+        # Update filing counts after all processing is complete
+        self._update_filing_counts(filing_id=filing_id)
+
+    def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""
-        fiscal_year = xbrl.entity_info['fiscal_year']
-        fiscal_period = xbrl.entity_info['fiscal_period']
+        fiscal_year = xbrl.entity_info['fiscal_year'] if xbrl else None
+        fiscal_period = xbrl.entity_info['fiscal_period'] if xbrl else None
 
         response = self.database.table("filings").upsert({
             "form": self.filing.form,

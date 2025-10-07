@@ -14,6 +14,9 @@ class FilingDefFourteenA(BaseFiling):
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
+        # Update filing counts after all processing is complete
+        self._update_filing_counts(filing_id=filing_id)
+
     def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
         response = self.database.table("filings").upsert({

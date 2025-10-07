@@ -1,3 +1,4 @@
+from typing import List
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
@@ -6,6 +7,9 @@ from pipeline.parsers.parser import Parser
 
 class FilingEightK(BaseFiling):
 
+    # Exhibit types to extract (excludes legal opinions, consents, XBRL)
+    included_exhibits: List[str] = ["1", "2", "3", "4", "10", "99"]
+
     def upsert(self):
         """Upserts the 8-K filing"""
         xbrl = self.filing.xbrl()
@@ -13,10 +17,14 @@ class FilingEightK(BaseFiling):
         filing_id = self._upsert_filing(xbrl=xbrl)
         pages = self._upsert_filing_pages(filing_id=filing_id)
         press_release_pages = self._upsert_press_release_pages(filing_id=filing_id)
+        self._upsert_attachments(filing_id=filing_id)
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
         if press_release_pages:
             self._upsert_press_release_chunks(pages=press_release_pages, filing_id=filing_id)
+
+        # Update filing counts after all processing is complete
+        self._update_filing_counts(filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
@@ -67,3 +75,64 @@ class FilingEightK(BaseFiling):
             } for i, chunk in enumerate(chunks)]
 
         self.database.table("press_release_chunks").upsert(data, on_conflict="filing_id,index").execute()
+
+    def _upsert_attachments(self, filing_id: int):
+        """Upserts attachments (exhibits) for 8-K filings"""
+        documents = self.filing.attachments.documents
+
+        for document in documents:
+            if not document.document_type or not document.document_type.startswith("EX-"):
+                continue
+
+            exhibit_number = document.document_type.replace("EX-", "")
+
+            # Skip 99.1 (press releases are handled separately)
+            if exhibit_number == "99.1":
+                continue
+
+            # Check if exhibit type is in included list (e.g., "1", "2", "3")
+            exhibit_prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
+            if exhibit_prefix not in self.included_exhibits:
+                continue
+
+            # Only process HTML documents
+            if not document.is_html():
+                continue
+
+            # Parse HTML content to pages
+            try:
+                parser = Parser(content=document.content)
+                pages = parser.get_pages()
+            except Exception:
+                # Skip attachments that fail to parse
+                continue
+
+            if not pages:
+                continue
+
+            # Upsert attachment metadata
+            attachment_response = self.database.table("filing_attachments").upsert({
+                "exhibit_number": exhibit_number,
+                "filename": document.document or f"ex-{exhibit_number}",
+                "description": document.description,
+                "num_pages": len(pages),
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            }, on_conflict="filing_id,exhibit_number").execute()
+
+            if not attachment_response.data:
+                continue
+
+            attachment_id = attachment_response.data[0]['id']
+
+            # Upsert attachment pages
+            self.database.table("filing_attachment_pages").upsert([{
+                "page": page['page'],
+                "content": page['content'],
+                "attachment_id": attachment_id,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            } for page in pages], on_conflict="attachment_id,page").execute()
+
+            # Chunk attachment
+            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)

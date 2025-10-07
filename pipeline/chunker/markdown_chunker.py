@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class MarkdownChunker:
     """Splits markdown content into chunks"""
 
-    def __init__(self, chunk_size: int = 1024, chunk_overlap: int = 128):
+    def __init__(self, chunk_size: int = 768, chunk_overlap: int = 128):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 

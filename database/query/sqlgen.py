@@ -169,7 +169,15 @@ def generate_select(ir: SelectIR, dialect) -> Tuple[str, List[Any]]:
         else:
             cols = "t.*"
     else:
-        cols = ", ".join(f"t.{dialect.q(c)}" for c in ir.columns)
+        # Handle raw SQL expressions (aggregates, functions) vs regular columns
+        col_parts = []
+        for c in ir.columns:
+            # Raw SQL expressions: functions (contains "("), qualified columns, or already quoted
+            if "(" in c or "." in c or "`" in c:
+                col_parts.append(c)
+            else:
+                col_parts.append(f"t.{dialect.q(c)}")
+        cols = ", ".join(col_parts)
         if ir.fts_rank_expr:
             cols += f", {ir.fts_rank_expr} AS _rank"
 
@@ -181,7 +189,8 @@ def generate_select(ir: SelectIR, dialect) -> Tuple[str, List[Any]]:
     if ir.order:
         parts = []
         for name, desc in ir.order:
-            if "(" in name or "__fts" in name or "." in name or "`" in name:
+            # Raw SQL expressions: functions, FTS, qualified columns, CASE statements
+            if "(" in name or "__fts" in name or "." in name or "`" in name or name.upper().startswith("CASE "):
                 parts.append(f"{name} {'DESC' if desc else 'ASC'}")
             else:
                 parts.append(f"t.{dialect.q(name)} {'DESC' if desc else 'ASC'}")

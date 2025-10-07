@@ -18,7 +18,6 @@ class BaseFiling(ABC):
         self.database = database
 
         self.accession_number = filing.accession_number
-        # Convert empty report_date to None (DEF 14A and some other filings don't have report dates)
         self.report_date = filing.report_date if filing.report_date else None
         self.filing_date = filing.filing_date.strftime('%Y-%m-%d')
 
@@ -71,7 +70,8 @@ class BaseFiling(ABC):
                                     "filename": note.html_file_name, "filing_id": filing_id,
                                     "company_id": self.company_id})
 
-        response = self.database.table("filing_notes").upsert(processed_notes, on_conflict="filing_id,filename").execute()
+        response = self.database.table("filing_notes").upsert(processed_notes,
+                                                              on_conflict="filing_id,filename").execute()
 
         note_ids = [note['id'] for note in response.data]
 
@@ -162,3 +162,38 @@ class BaseFiling(ABC):
         response = self.database.table("filing_chunks").upsert(data, on_conflict="filing_id,index").execute()
 
         return response.data
+
+    def _update_filing_counts(self, filing_id: int):
+        """Updates the filing with page count and attachment count"""
+        # Count filing pages
+        num_pages = self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
+
+        # Count attachments
+        num_attachments = self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
+
+        # Update filing record
+        self.database.table("filings").update({
+            "num_pages": num_pages,
+            "num_attachments": num_attachments
+        }).eq("id", filing_id).execute()
+
+    def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int):
+        """Chunks attachment pages and upserts them"""
+        chunks = self.markdown_chunker.split(pages=pages)
+
+        data = [
+            {
+                "index": i,
+                "page": chunk.page,
+                "content": chunk.content,
+                "has_table": chunk.has_table,
+                "attachment_id": attachment_id,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            } for i, chunk in enumerate(chunks)]
+
+        if data:
+            self.database.table("filing_attachment_chunks").upsert(
+                data,
+                on_conflict="attachment_id,index"
+            ).execute()

@@ -144,6 +144,10 @@ class VectorStore:
             query_vec = query_vec / norm
 
         with self._lock:
+            # Check if vector file is empty before attempting memmap
+            if self.vec_file.stat().st_size == 0:
+                return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
+
             # Load vectors and IDs via memmap (protected by lock to ensure consistency)
             vectors = np.memmap(self.vec_file, dtype=np.float32, mode='r')
             total_count = len(vectors) // self.dim

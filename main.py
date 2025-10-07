@@ -1,13 +1,38 @@
 import asyncio
 import argparse
 import logging
+import signal
+import atexit
 from dotenv import load_dotenv
 from agent.agent import Agent
 from utils.print_messages import print_messages
 
+_agent_instance = None
+
+
+def cleanup_handler():
+    """Cleanup handler called on exit or signal."""
+    if _agent_instance and hasattr(_agent_instance, 'database'):
+        try:
+            _agent_instance.database.close()
+        except Exception:
+            pass
+
+
+def signal_handler(signum, frame):
+    """Handle SIGINT and SIGTERM gracefully."""
+    print(f"\nReceived signal {signum}, shutting down gracefully...")
+    cleanup_handler()
+    exit(0)
+
 
 if __name__ == '__main__':
     load_dotenv()
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    atexit.register(cleanup_handler)
 
     logging.getLogger('edgar.core').setLevel(logging.ERROR)
     logging.getLogger('pipeline.filings.filing_tenk').setLevel(logging.ERROR)
@@ -16,7 +41,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''Of AMZN, META, or GOOG, who plans to spend the most in capex in 2025?''')
+                        default='''Summarize the key terms of the Series D mandatory convertible preferred stock (size of offering, closing date, price, liquidation preference, dividend rights, conversion terms, voting rights, purpose) that KKR & Co. (NYSE:KKR) offered in March 2025. ''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
     parser.add_argument('--max-iter', type=int, default=10, help='Max iterations (default: 10)')
@@ -30,6 +55,11 @@ if __name__ == '__main__':
         max_iter=args.max_iter
     )
 
-    asyncio.run(agent.run(query=args.query))
+    _agent_instance = agent
+
+    try:
+        asyncio.run(agent.run(query=args.query))
+    finally:
+        cleanup_handler()
 
     print_messages(agent)

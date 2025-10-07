@@ -7,8 +7,10 @@ from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
-from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchFilingsAction, ReadFilingAction,
-                           ReadPressReleaseAction, ViewFinancialStatementsAction)
+from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, SearchFilingsAction,
+                           SearchPressReleasesAction, SearchFilingNotesAction, SearchAttachmentsAction,
+                           ReadFilingAction, ReadPressReleaseAction, ReadAttachmentAction,
+                           ViewFinancialStatementsAction, PythonExecAction)
 
 
 class Agent:
@@ -35,10 +37,16 @@ class Agent:
         actions = [
             ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
+            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         while self.num_iter < self.max_iter:

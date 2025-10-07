@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import List, Set
+from typing import List, Set, Optional
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
 
@@ -23,23 +23,40 @@ class BaseAction(ABC):
         """Calls the action with the LLM provided action"""
         raise NotImplementedError
 
-    def sync_symbols(self, symbols: List[str]):
-        """Sync the filings for the symbols"""
+    def sync_symbols(self, symbols: List[str], forms: Optional[List[str]] = None,
+                     start_date: Optional[str] = None, end_date: Optional[str] = None):
+        """Sync the filings for the symbols with optional filtering
+
+        Args:
+            symbols: List of ticker symbols to sync
+            forms: List of forms to sync (e.g., ['10-K', '10-Q']). Defaults to all forms.
+            start_date: Filter filings by report_date >= this date (ISO format 'YYYY-MM-DD')
+            end_date: Filter filings by report_date <= this date (ISO format 'YYYY-MM-DD')
+        """
         not_found = []
 
         for symbol in symbols:
             company = Company(symbol=symbol, database=self.database, edgar_user_agent=self.edgar_user_agent,
                               start_year=self.start_year)
 
-            # Only show sync message if not already cached
-            if not company.exists():
-                print(f"  {self._c('⟳', 'yellow')} Syncing {symbol} from EDGAR...", end="", flush=True)
-                sync_successful = company.sync()
-                if sync_successful:
-                    print(f" {self._c('✓', 'green')}", flush=True)
-                else:
-                    print(f" {self._c('✗', 'red')} Not found", flush=True)
-                    not_found.append(symbol)
+            # Build sync description
+            sync_desc = symbol
+            if forms or start_date or end_date:
+                parts = []
+                if forms:
+                    parts.append(f"{', '.join(forms)}")
+                if start_date or end_date:
+                    date_range = f"{start_date or '...'} to {end_date or '...'}"
+                    parts.append(f"({date_range})")
+                sync_desc += f" [{' '.join(parts)}]"
+
+            print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR...", end="", flush=True)
+            sync_successful = company.sync(forms=forms, start_date=start_date, end_date=end_date)
+            if sync_successful:
+                print(f" {self._c('✓', 'green')}", flush=True)
+            else:
+                print(f" {self._c('✗', 'red')} Not found", flush=True)
+                not_found.append(symbol)
 
         return not_found
 
