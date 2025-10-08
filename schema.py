@@ -249,41 +249,6 @@ class CompanyFilingNoteChunks(View):
     company_symbols = Field(table="companies", field="symbols")
 
 
-class PressReleasePages(Table):
-    __tablename__ = "press_release_pages"
-
-    id = Serial()
-    page = Integer(nullable=False, index=True)
-    content = Text(nullable=False, fts=True)
-
-    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
-    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
-
-    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
-    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
-
-    __uniques__ = [("filing_id", "page")]
-
-
-class PressReleaseChunks(Table):
-    __tablename__ = "press_release_chunks"
-
-    id = Serial()
-
-    index = Integer(nullable=False)
-    page = Integer(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
-    has_table = Boolean(nullable=False, default=False, index=True)
-
-    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
-    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
-
-    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
-    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
-
-    __uniques__ = [("filing_id", "index")]
-
-
 class CompanyFilingChunks(View):
     __viewname__ = "company_filing_chunks"
     __tables__ = (FilingChunks, Filings, Companies)
@@ -306,62 +271,6 @@ class CompanyFilingChunks(View):
     accession_number = Field(table="filings", field="accession_number")
 
     company_id = Field(table="filing_chunks", field="company_id")
-    company_name = Field(table="companies", field="name")
-    company_symbols = Field(table="companies", field="symbols")
-    company_exchanges = Field(table="companies", field="exchanges")
-    company_sector = Field(table="companies", field="sector")
-    company_industry = Field(table="companies", field="industry")
-
-
-class CompanyPressReleaseChunks(View):
-    __viewname__ = "company_press_release_chunks"
-    __tables__ = (PressReleaseChunks, Filings, Companies)
-
-    id = Field(table="press_release_chunks", field="id")
-    index = Field(table="press_release_chunks", field="index")
-    page = Field(table="press_release_chunks", field="page")
-    content = Field(table="press_release_chunks", field="content")
-    has_table = Field(table="press_release_chunks", field="has_table")
-
-    filing_id = Field(table="press_release_chunks", field="filing_id")
-    form = Field(table="filings", field="form")
-    amendment = Field(table="filings", field="amendment")
-    items = Field(table="filings", field="items")
-    press_release = Field(table="filings", field="press_release")
-    fiscal_year = Field(table="filings", field="fiscal_year")
-    fiscal_period = Field(table="filings", field="fiscal_period")
-    filing_date = Field(table="filings", field="filing_date")
-    report_date = Field(table="filings", field="report_date")
-    accession_number = Field(table="filings", field="accession_number")
-
-    company_id = Field(table="press_release_chunks", field="company_id")
-    company_name = Field(table="companies", field="name")
-    company_symbols = Field(table="companies", field="symbols")
-    company_exchanges = Field(table="companies", field="exchanges")
-    company_sector = Field(table="companies", field="sector")
-    company_industry = Field(table="companies", field="industry")
-
-
-class CompanyFilingPressReleases(View):
-    __viewname__ = "company_filing_press_releases"
-    __tables__ = (PressReleasePages, Filings, Companies)
-
-    id = Field(table="press_release_pages", field="id")
-    page = Field(table="press_release_pages", field="page")
-    content = Field(table="press_release_pages", field="content")
-
-    filing_id = Field(table="press_release_pages", field="filing_id")
-    form = Field(table="filings", field="form")
-    amendment = Field(table="filings", field="amendment")
-    items = Field(table="filings", field="items")
-    press_release = Field(table="filings", field="press_release")
-    fiscal_year = Field(table="filings", field="fiscal_year")
-    fiscal_period = Field(table="filings", field="fiscal_period")
-    filing_date = Field(table="filings", field="filing_date")
-    report_date = Field(table="filings", field="report_date")
-    accession_number = Field(table="filings", field="accession_number")
-
-    company_id = Field(table="press_release_pages", field="company_id")
     company_name = Field(table="companies", field="name")
     company_symbols = Field(table="companies", field="symbols")
     company_exchanges = Field(table="companies", field="exchanges")
@@ -401,6 +310,7 @@ class FilingAttachments(Table):
     filename = Text(nullable=False)
     description = Text(nullable=True)
     num_pages = Integer(nullable=True)
+    is_press_release = Boolean(default=False, nullable=False)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -434,8 +344,7 @@ class FilingAttachmentChunks(Table):
     id = Serial()
     index = Integer(nullable=False)
     page = Integer(nullable=False)
-    # NOTE: vector=True disabled for now - may re-enable later if needed
-    content = Text(nullable=False, fts=True)  # vector=True
+    content = Text(nullable=False, fts=True, vector=True)
     has_table = Boolean(nullable=False, default=False, index=True)
 
     attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)
@@ -456,6 +365,7 @@ class CompanyFilingAttachments(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     filename = Field(table="filing_attachments", field="filename")
     description = Field(table="filing_attachments", field="description")
+    is_press_release = Field(table="filing_attachments", field="is_press_release")
 
     filing_id = Field(table="filing_attachments", field="filing_id")
     form = Field(table="filings", field="form")
@@ -487,6 +397,7 @@ class CompanyFilingAttachmentPages(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     attachment_filename = Field(table="filing_attachments", field="filename")
     attachment_description = Field(table="filing_attachments", field="description")
+    is_press_release = Field(table="filing_attachments", field="is_press_release")
 
     filing_id = Field(table="filing_attachment_pages", field="filing_id")
     form = Field(table="filings", field="form")
@@ -520,6 +431,7 @@ class CompanyFilingAttachmentChunks(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     attachment_filename = Field(table="filing_attachments", field="filename")
     attachment_description = Field(table="filing_attachments", field="description")
+    is_press_release = Field(table="filing_attachments", field="is_press_release")
 
     filing_id = Field(table="filing_attachment_chunks", field="filing_id")
     form = Field(table="filings", field="form")
@@ -545,12 +457,10 @@ schema.add_table(Filings)
 schema.add_table(FinancialStatements)
 schema.add_table(FilingNotes)
 schema.add_table(FilingPages)
-schema.add_table(PressReleasePages)
 schema.add_table(FilingAttachments)
 schema.add_table(FilingAttachmentPages)
 schema.add_table(FilingAttachmentChunks)
 schema.add_table(FilingChunks)
-schema.add_table(PressReleaseChunks)
 schema.add_table(FilingNoteChunks)
 
 schema.add_view(CompanyFilings)
@@ -558,8 +468,6 @@ schema.add_view(CompanyFilingPages)
 schema.add_view(CompanyFilingNotes)
 schema.add_view(CompanyFilingNoteChunks)
 schema.add_view(CompanyFilingChunks)
-schema.add_view(CompanyPressReleaseChunks)
-schema.add_view(CompanyFilingPressReleases)
 schema.add_view(CompanyFinancialStatements)
 schema.add_view(CompanyFilingAttachments)
 schema.add_view(CompanyFilingAttachmentPages)

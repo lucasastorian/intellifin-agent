@@ -34,7 +34,6 @@ class ReadPressReleaseAction(BaseAction):
 
         self.log_start("ReadPressRelease", f"Filing #{args.filing_id}, pages {args.start_page}–{args.end_page}", thought=args.thought)
 
-        # Get filing metadata
         filing_result = (
             self.database
             .table("filings")
@@ -68,21 +67,22 @@ class ReadPressReleaseAction(BaseAction):
         )
         company = company_result.data[0] if company_result.data else {"name": "Unknown", "symbols": [], "exchanges": []}
 
-        # Get press release pages
+        # Get press release attachment pages
         max_row_result = (
             self.database
-            .table("press_release_pages")
+            .table("company_filing_attachment_pages")
             .select("page")
             .eq("filing_id", args.filing_id)
+            .eq("is_press_release", True)
             .order("page", desc=True)
             .limit(1)
             .execute()
         )
 
         if not max_row_result.data:
-            self.log_error(f"No press release pages for filing #{args.filing_id}")
+            self.log_error(f"No press release attachment for filing #{args.filing_id}")
             return Message(role="tool", status="completed",
-                         content=f"No press release pages stored for filing {args.filing_id}.",
+                         content=f"No press release attachment stored for filing {args.filing_id}.",
                          error=True, action_id=action.id)
 
         max_page = max_row_result.data[0]["page"]
@@ -98,9 +98,10 @@ class ReadPressReleaseAction(BaseAction):
 
         pages_result = (
             self.database
-            .table("press_release_pages")
+            .table("company_filing_attachment_pages")
             .select("page,content")
             .eq("filing_id", args.filing_id)
+            .eq("is_press_release", True)
             .gte("page", start)
             .lte("page", end)
             .order("page", desc=False)

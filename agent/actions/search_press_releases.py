@@ -106,16 +106,16 @@ class SearchPressReleasesAction(BaseAction):
         return Message(role="tool", status="completed", content=content, action_id=action.id)
 
     async def _search_press_release_chunks(self, args: SearchPressReleases) -> List[dict]:
-        """Vector search press release chunks using company_press_release_chunks view"""
+        """Vector search press release chunks using company_filing_attachment_chunks view"""
         try:
             query = (
                 self.database
-                .table("company_press_release_chunks")
+                .table("company_filing_attachment_chunks")
                 .select(
-                    "id,filing_id,page,content,index,has_table,form,filing_date,report_date,company_name,company_symbols")
+                    "id,filing_id,attachment_id,page,content,index,has_table,exhibit_number,form,filing_date,report_date,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", ['8-K', '8-K/A'])
-                .eq("press_release", True)
+                .eq("is_press_release", True)
                 .gte("report_date", args.start_date)
                 .lte("report_date", args.end_date)
             )

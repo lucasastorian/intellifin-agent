@@ -47,6 +47,11 @@ class FinancialStatements:
 
     def _format_statement(self, statement):
         """Formats the statement - uses current_period_only to get only the relevant period"""
+        # Handle missing statements (e.g., bankruptcy filings, incomplete XBRL)
+        if statement is None:
+            print(f"  ⚠ Warning: Statement is None for filing_id={self.filing_id}, report_date={self.report_date}", flush=True)
+            return []
+
         # Use current_period_only=True to filter to only the reported period
         # This avoids YTD/comparative periods and ensures we get the right column
         df = statement.to_dataframe(include_dimensions=True, current_period_only=True)

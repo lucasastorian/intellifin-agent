@@ -10,9 +10,6 @@ logger = logging.getLogger(__name__)
 
 class FilingTenQ(BaseFiling):
 
-    # Exhibit types to extract (material contracts and subsidiaries)
-    included_exhibits: List[str] = ["10", "21"]
-
     def upsert(self):
         """Upserts the 10-Q filing and associated pages"""
         xbrl = self.filing.xbrl()
@@ -49,20 +46,14 @@ class FilingTenQ(BaseFiling):
         return response.data[0]['id']
 
     def _upsert_attachments(self, filing_id: int):
-        """Upserts attachments (exhibits) for 10-Q filings"""
+        """Upserts ALL attachments (exhibits) for 10-Q filings, including press releases (EX-99)"""
         documents = self.filing.attachments.documents
 
         for document in documents:
-            # Normalize exhibit number: "EX-10.1" -> "10.1", "EX-21" -> "21"
             if not document.document_type or not document.document_type.startswith("EX-"):
                 continue
 
             exhibit_number = document.document_type.replace("EX-", "")
-
-            # Check if exhibit type is in included list (e.g., "10", "21")
-            exhibit_prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
-            if exhibit_prefix not in self.included_exhibits:
-                continue
 
             if not document.is_html():
                 continue
@@ -73,11 +64,16 @@ class FilingTenQ(BaseFiling):
             if not pages:
                 continue
 
+            # Mark EX-99* exhibits as press releases
+            is_press_release = exhibit_number.startswith("99")
+
+            # Upsert attachment metadata
             attachment_response = self.database.table("filing_attachments").upsert({
                 "exhibit_number": exhibit_number,
                 "filename": document.document or f"ex-{exhibit_number}",
                 "description": document.description,
                 "num_pages": len(pages),
+                "is_press_release": is_press_release,
                 "filing_id": filing_id,
                 "company_id": self.company_id
             }, on_conflict="filing_id,exhibit_number").execute()
@@ -87,6 +83,7 @@ class FilingTenQ(BaseFiling):
 
             attachment_id = attachment_response.data[0]['id']
 
+            # Upsert attachment pages
             self.database.table("filing_attachment_pages").upsert([{
                 "page": page['page'],
                 "content": page['content'],
@@ -95,4 +92,5 @@ class FilingTenQ(BaseFiling):
                 "company_id": self.company_id
             } for page in pages], on_conflict="attachment_id,page").execute()
 
-            # self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
+            # Upsert attachment chunks
+            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
