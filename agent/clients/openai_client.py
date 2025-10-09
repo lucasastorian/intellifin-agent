@@ -43,7 +43,7 @@ class OpenAIClient:
         async for event in response:
 
             if event.type == 'response.created':
-                completion.external_id = event.response.id
+                pass
 
             elif event.type == 'response.in_progress':
                 pass
@@ -54,6 +54,8 @@ class OpenAIClient:
                     completion.thoughts.append(Thought(id=event.item.id, summaries=[]))
 
                 if event.item.type == 'function_call':
+                    completion.external_id = event.item.id
+
                     self.tool_call_arguments = ""
                     action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={})
                     completion.actions.append(action)
@@ -84,6 +86,9 @@ class OpenAIClient:
                     continue
 
                 completion.actions[-1].body = body_json
+
+            elif event.type == 'response.function_call_arguments.done':
+                completion.actions[-1].status = 'parsed'
 
             elif event.type == 'response.output_text.delta':
                 completion.content += event.delta

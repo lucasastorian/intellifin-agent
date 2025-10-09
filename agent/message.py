@@ -37,12 +37,9 @@ class Message:
     def openai_format(self) -> List[dict]:
         """Formats the message as a list of items for the OpenAI Client"""
         if self.role == "tool":
-            content = [{"call_id": self.action_id, "output": self.content, "type": "function_call_output"}]
-            return [{"role": self.role, "content": content}]
+            return [{"call_id": self.action_id, "output": self.content, "type": "function_call_output"}]
 
         elif self.role == "assistant":
-
-            items = []
 
             thoughts = [{"id": thought.id,
                          "type": "reasoning",
@@ -52,9 +49,12 @@ class Message:
             tool_calls = [{"call_id": action.id, 'type': 'function_call', "name": action.name,
                            "arguments": json.dumps(action.body)} for action in self.actions]
 
-            message = {"id": self.external_id, "role": self.role, "content": self.content, "status": "completed",
-                       "type": "message"}
+            if self.content:
+                messages = [{"id": self.external_id, "role": self.role, "content": self.content, "status": "completed",
+                             "type": "message"}]
+            else:
+                messages = []
 
-            return thoughts + tool_calls + [message]
+            return thoughts + tool_calls + messages
 
         return [{"role": self.role, "content": self.content}]
