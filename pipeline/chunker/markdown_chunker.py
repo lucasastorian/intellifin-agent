@@ -14,10 +14,10 @@ class MarkdownChunker:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def split(self, pages: List[Dict[str, Union[int, str]]]):
-        """Split the pages into chunks"""
+    def split(self, pages: List[Dict[str, Union[int, str]]], header: str = None):
+        """Split the pages into chunks with optional header for embedding context"""
         blocks = self._split_into_blocks(pages=pages)
-        return self._chunk_blocks(blocks=blocks)
+        return self._chunk_blocks(blocks=blocks, header=header)
 
     def chunk_text(self, text: str) -> List[str]:
         """Chunk a single text string into multiple chunks"""
@@ -71,7 +71,7 @@ class MarkdownChunker:
             return True
         return True
 
-    def _chunk_blocks(self, blocks: List[BaseBlock]):
+    def _chunk_blocks(self, blocks: List[BaseBlock], header: str = None):
         """Converts the blocks to chunks"""
         chunks = []
         chunk_blocks = []
@@ -82,26 +82,26 @@ class MarkdownChunker:
 
             if block.block_type == 'Text':
                 chunk_blocks, num_tokens, chunks = self._process_text_block(
-                    block, chunk_blocks, num_tokens, chunks
+                    block, chunk_blocks, num_tokens, chunks, header
                 )
 
             elif block.block_type == 'Table':
                 chunk_blocks, num_tokens, chunks = self._process_table_block(
-                    block, chunk_blocks, num_tokens, chunks, blocks, i
+                    block, chunk_blocks, num_tokens, chunks, blocks, i, header
                 )
 
             else:
                 chunk_blocks, num_tokens, chunks = self._process_header_table_block(
-                    block, chunk_blocks, num_tokens, chunks, next_block
+                    block, chunk_blocks, num_tokens, chunks, next_block, header
                 )
 
         if chunk_blocks:
-            chunks.append(MarkdownChunk(blocks=chunk_blocks))
+            chunks.append(MarkdownChunk(blocks=chunk_blocks, header=header))
 
         return chunks
 
     def _process_text_block(self, block: TextBlock, chunk_blocks: List[BaseBlock], num_tokens: int,
-                            chunks: List[MarkdownChunk]):
+                            chunks: List[MarkdownChunk], header: str = None):
         """Process a text block by breaking it into sentences if needed"""
         sentences = []
         sentences_tokens = 0
@@ -113,7 +113,7 @@ class MarkdownChunker:
                     chunk_blocks.append(new_block)
                     num_tokens += sentences_tokens
 
-                chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks)
+                chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks, header=header)
 
                 sentences = [sentence]
                 sentences_tokens = sentence.tokens
@@ -130,7 +130,7 @@ class MarkdownChunker:
         return chunk_blocks, num_tokens, chunks
 
     def _process_table_block(self, block: BaseBlock, chunk_blocks: List[BaseBlock], num_tokens: int,
-                             chunks: List[MarkdownChunk], all_blocks: List[BaseBlock], block_idx: int):
+                             chunks: List[MarkdownChunk], all_blocks: List[BaseBlock], block_idx: int, header: str = None):
         """Process a table block with optional header backtrack"""
         context = []
         context_tokens = 0
@@ -158,7 +158,7 @@ class MarkdownChunker:
 
         if num_tokens + context_tokens + block.tokens > self.chunk_size:
             if chunk_blocks:
-                chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks)
+                chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks, header=header)
 
             # If we're backtracking context and the last chunk is ONLY that context, remove it
             if context and chunks and len(chunks[-1].blocks) == len(context):
@@ -174,7 +174,7 @@ class MarkdownChunker:
         return chunk_blocks, num_tokens, chunks
 
     def _process_header_table_block(self, block: BaseBlock, chunk_blocks: List[BaseBlock], num_tokens: int,
-                                    chunks: List[MarkdownChunk], next_block: BaseBlock):
+                                    chunks: List[MarkdownChunk], next_block: BaseBlock, header: str = None):
         """Process a header block"""
         if not chunk_blocks:
             chunk_blocks.append(block)
@@ -188,7 +188,7 @@ class MarkdownChunker:
             return chunk_blocks, num_tokens, chunks
 
         if num_tokens + block.tokens > self.chunk_size:
-            chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks)
+            chunks, chunk_blocks, num_tokens = self._create_chunk(chunks=chunks, blocks=chunk_blocks, header=header)
             chunk_blocks.append(block)
             num_tokens += block.tokens
         else:
@@ -197,10 +197,10 @@ class MarkdownChunker:
 
         return chunk_blocks, num_tokens, chunks
 
-    def _create_chunk(self, chunks: List[MarkdownChunk], blocks: List[BaseBlock]) -> Tuple[
+    def _create_chunk(self, chunks: List[MarkdownChunk], blocks: List[BaseBlock], header: str = None) -> Tuple[
         List[MarkdownChunk], List[BaseBlock], int]:
         """Creates a chunk, and return a new list of blocks that """
-        chunks.append(MarkdownChunk(blocks=blocks))
+        chunks.append(MarkdownChunk(blocks=blocks, header=header))
 
         if not self.chunk_overlap:
             return chunks, [], 0

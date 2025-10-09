@@ -7,9 +7,12 @@ from abc import ABC, abstractmethod
 from database.database import Database
 from pipeline.company import Company
 from agent.message import Action
+from agent.action_response import ActionResponse
 
 
 class BaseAction(ABC):
+    """Defines an Action, i.e. tool call an LLM can take"""
+
     name: str
     schema: BaseModel
 
@@ -19,7 +22,7 @@ class BaseAction(ABC):
         self.start_year = start_year
 
     @abstractmethod
-    async def call(self, action: Action):
+    async def call(self, action: Action) -> ActionResponse:
         """Calls the action with the LLM provided action"""
         raise NotImplementedError
 

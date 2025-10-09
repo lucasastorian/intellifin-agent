@@ -1,6 +1,7 @@
+import asyncio
 from bs4 import BeautifulSoup
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import Optional, List, Literal, Dict
 from edgar.entity.filings import EntityFiling
 from edgar.xbrl import XBRL
 
@@ -8,13 +9,17 @@ from database.database import Database
 from pipeline.parsers.parser import Parser
 from pipeline.chunker.markdown_chunker import MarkdownChunker
 from pipeline.parsers.financial_statement import FinancialStatements
+from pipeline.enrichment.openai_client import OpenAIClient
+from pipeline.enrichment.attachment_summarizer import AttachmentSummarizer
+from pipeline.enrichment.note_preview_generator import NotePreviewGenerator
 
 
 class BaseFiling(ABC):
 
-    def __init__(self, filing: EntityFiling, company_id: int, database: Database):
+    def __init__(self, filing: EntityFiling, company: dict, database: Database):
         self.filing = filing
-        self.company_id = company_id
+        self.company = company
+        self.company_id = company['id']
         self.database = database
 
         self.accession_number = filing.accession_number
@@ -22,6 +27,11 @@ class BaseFiling(ABC):
         self.filing_date = filing.filing_date.strftime('%Y-%m-%d')
 
         self.markdown_chunker = MarkdownChunker()
+
+        # Initialize LLM enrichment clients
+        openai_client = OpenAIClient()
+        self.attachment_summarizer = AttachmentSummarizer(openai_client)
+        self.note_preview_generator = NotePreviewGenerator(openai_client)
 
     @abstractmethod
     def upsert(self):
@@ -124,20 +134,82 @@ class BaseFiling(ABC):
         # Chunk each note
         self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
 
+        # Generate previews for notes
+        note_data = [(note_id, processed_note['title'], processed_note['content'])
+                     for note_id, processed_note in zip(note_ids, processed_notes)]
+        asyncio.run(self._enrich_note_previews(note_data))
+
         return note_ids
+
+    def _build_note_embedding_header(self, company_data: dict, filing_data: dict, note_title: str) -> str:
+        """Build a rich contextual header for filing note embedding"""
+        parts = []
+
+        # Company header
+        name = company_data.get('name')
+        symbols = company_data.get('symbols', [])
+        exchanges = company_data.get('exchanges', [])
+        ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
+
+        if name:
+            parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
+
+        # Sector/Industry
+        sector = company_data.get('sector')
+        industry = company_data.get('industry')
+        if sector or industry:
+            sector_str = f"Sector: {sector}" if sector else ""
+            industry_str = f"Industry: {industry}" if industry else ""
+            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
+
+        # Filing metadata
+        form = filing_data.get('form')
+        fiscal_year = filing_data.get('fiscal_year')
+        fiscal_period = filing_data.get('fiscal_period')
+        filing_date = filing_data.get('filing_date')
+        report_date = filing_data.get('report_date')
+
+        if form:
+            filing_parts = [f"Form {form}"]
+            if fiscal_year:
+                period_str = f"FY {fiscal_year}"
+                if fiscal_period and fiscal_period != 'FY':
+                    period_str += f" {fiscal_period}"
+                filing_parts.append(period_str)
+            if filing_date:
+                filing_parts.append(f"Filed: {filing_date}")
+            if report_date:
+                filing_parts.append(f"Period Ending: {report_date}")
+            parts.append(" | ".join(filing_parts))
+
+        # Note title
+        if note_title:
+            parts.append(f"\n## Note: {note_title}\n")
+
+        return "\n".join(parts)
 
     def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
         """Chunks filing notes and upserts them"""
+        # Get company data for header
+        company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
+
+        # Get filing data for header
+        filing_data = self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute().data[0]
+
         all_chunks = []
 
         for note_id, note_data in zip(note_ids, processed_notes):
-            # Chunk the note content
-            chunks = self.markdown_chunker.split(pages=[{"page": 0, "content": note_data['content']}])
+            # Build embedding header
+            header = self._build_note_embedding_header(company_data, filing_data, note_data['title'])
+
+            # Chunk the note content with header
+            chunks = self.markdown_chunker.split(pages=[{"page": 0, "content": note_data['content']}], header=header)
 
             for i, chunk in enumerate(chunks):
                 all_chunks.append({
                     "index": i,
                     "content": chunk.content,
+                    "embedding": chunk.embedding_text,  # Uses header + content
                     "has_table": chunk.has_table,
                     "filing_note_id": note_id,
                     "filing_id": filing_id,
@@ -191,33 +263,12 @@ class BaseFiling(ABC):
 
         return ''.join([str(element) for element in elements])
 
-    def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
-        """Chunks the filing pages and upserts them"""
-        chunks = self.markdown_chunker.split(pages=pages)
-
-        data = [
-            {
-                "index": i,
-                "page": chunk.page,
-                "content": chunk.content,
-                "has_table": chunk.has_table,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            } for i, chunk in enumerate(chunks)]
-
-        response = self.database.table("filing_chunks").upsert(data, on_conflict="filing_id,index").execute()
-
-        return response.data
-
     def _update_filing_counts(self, filing_id: int):
         """Updates the filing with page count and attachment count"""
-        # Count filing pages
         num_pages = self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
 
-        # Count attachments
         num_attachments = self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
 
-        # Update filing record
         self.database.table("filings").update({
             "num_pages": num_pages,
             "num_attachments": num_attachments
@@ -243,3 +294,66 @@ class BaseFiling(ABC):
                 data,
                 on_conflict="attachment_id,index"
             ).execute()
+
+    async def _enrich_attachments(self, attachment_data: List[Dict], filing: dict) -> List[Dict]:
+        """Generate LLM summaries for all attachments in parallel, returns enriched attachments"""
+        if not attachment_data:
+            return []
+
+        header = self.attachment_summarizer.build_header(self.company, filing)
+
+        tasks = [
+            self.attachment_summarizer.summarize(att["pages"], header)
+            for att in attachment_data
+        ]
+
+        summaries = await asyncio.gather(*tasks, return_exceptions=True)
+
+        updates = []
+        enriched = []
+        for att, result in zip(attachment_data, summaries):
+            if isinstance(result, Exception):
+                continue
+
+            if result and (result.get("title") or result.get("summary")):
+                updates.append({
+                    "id": att["attachment_id"],
+                    "title": result["title"],
+                    "summary": result["summary"]
+                })
+                enriched.append({
+                    "exhibit_number": att.get("exhibit_number", "Unknown"),
+                    "title": result["title"],
+                    "summary": result["summary"]
+                })
+
+        if updates:
+            self.database.table("filing_attachments").upsert(updates, on_conflict="id").execute()
+
+        return enriched
+
+    async def _enrich_note_previews(self, note_data: List[tuple]):
+        """Generate one-sentence previews for all notes in parallel"""
+        if not note_data:
+            return
+
+        tasks = [
+            self.note_preview_generator.generate(title, content)
+            for note_id, title, content in note_data
+        ]
+
+        previews = await asyncio.gather(*tasks, return_exceptions=True)
+
+        updates = []
+        for (note_id, title, content), result in zip(note_data, previews):
+            if isinstance(result, Exception):
+                continue
+
+            if result:
+                updates.append({
+                    "id": note_id,
+                    "preview": result
+                })
+
+        if updates:
+            self.database.table("filing_notes").upsert(updates, on_conflict="id").execute()

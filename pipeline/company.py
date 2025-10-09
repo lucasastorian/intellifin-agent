@@ -1,5 +1,5 @@
+import asyncio
 from typing import List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
@@ -29,80 +29,70 @@ class Company:
         set_identity(edgar_user_agent)
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
-    def sync(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-             end_date: Optional[str] = None) -> int:
-        """Sync filings for this company
-
-        Args:
-            forms: List of forms to sync (e.g., ['10-K', '10-Q']). Defaults to all forms.
-            start_date: Filter filings by report_date >= this date (ISO format 'YYYY-MM-DD')
-            end_date: Filter filings by report_date <= this date (ISO format 'YYYY-MM-DD')
-
-        Returns:
-            Number of filings actually synced (0 if company not found or all already synced)
-        """
+    async def sync(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
+                   end_date: Optional[str] = None) -> int:
         if self.company.not_found:
             return 0
 
-        return self.upsert(forms=forms, start_date=start_date, end_date=end_date)
+        return await self.upsert(forms=forms, start_date=start_date, end_date=end_date)
 
-    def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-               end_date: Optional[str] = None) -> int:
-        company_id = self._get_or_create_company_id()
-        if company_id is None:
-            return 0  # Company not found in provisioned data
-        synced_count = self._upsert_filings(company_id=company_id, forms=forms, start_date=start_date, end_date=end_date)
-        self.on_sync_complete(company_id=company_id)
+    async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
+                     end_date: Optional[str] = None) -> int:
+        company = self._get_company()
+
+        if company is None:
+            return 0
+
+        synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
+                                                   end_date=end_date)
+        self.on_sync_complete(company_id=company['id'])
+
         return synced_count
 
     def on_sync_complete(self, company_id: int):
         update_data = {"synced": True}
 
-        # Update fiscal_year_end if available
-        if hasattr(self.company, 'fiscal_year_end') and self.company.fiscal_year_end:
+        if self.company.fiscal_year_end:
             update_data["fiscal_year_end"] = self.company.fiscal_year_end
 
         self.database.table("companies").update(update_data).eq("id", company_id).execute()
 
-    def _upsert_filings(self, company_id: int, forms: Optional[List[str]] = None,
-                        start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
-        filings = self._load_filings(forms=forms)
+    async def _upsert_filings(self, company: dict, forms: Optional[List[str]] = None,
+                              start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
+        filings = await asyncio.to_thread(self._load_filings, forms=forms)
 
-        # Filter filings by date range if specified
         if start_date or end_date:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
 
-        def upsert_filing(filing: EntityFiling):
-            # Check if filing is already synced
+        def upsert_filing_sync(filing: EntityFiling):
+            """Synchronous wrapper for filing upsert - runs in thread"""
             if self._is_filing_synced(filing.accession_number):
-                return None  # Already synced, don't count
+                return None
 
-            parser = self._get_filing_parser(filing=filing, company_id=company_id)
+            parser = self._get_filing_parser(filing=filing, company=company)
             parser.upsert()
 
-            # Mark filing as synced
             self._mark_filing_synced(filing.accession_number)
 
-            return filing.form  # Return form to indicate it was synced
+            return filing.form
 
-        synced_count = 0
-        with ThreadPoolExecutor(max_workers=9) as executor:
-            futures = {executor.submit(upsert_filing, filing): filing for filing in filings}
+        # Process all filings concurrently in separate threads
+        results = await asyncio.gather(
+            *[asyncio.to_thread(upsert_filing_sync, filing) for filing in filings],
+            return_exceptions=True
+        )
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None:  # Was actually synced
-                    synced_count += 1
+        synced_count = sum(1 for result in results if result is not None and not isinstance(result, Exception))
 
         return synced_count
 
-    def _get_or_create_company_id(self) -> Optional[int]:
+    def _get_company(self) -> Optional[dict]:
         response = self.database.table("companies").select("id").contains("symbols", self.symbol).limit(1).execute()
 
         if not response.data:
-            return None  # Company not found in provisioned data
+            return None
 
-        return response.data[0]['id']
+        return response.data[0]
 
     def _load_filings(self, forms: Optional[List[str]] = None) -> EntityFilings:
         """Load filings from EDGAR"""
@@ -122,10 +112,8 @@ class Company:
             filter_date = filing.report_date or filing.filing_date
 
             if not filter_date:
-                # Skip filings with neither date
                 continue
 
-            # Convert to date object if it's a string
             if isinstance(filter_date, str):
                 filter_date = date.fromisoformat(filter_date)
 
@@ -140,31 +128,32 @@ class Company:
 
     def _is_filing_synced(self, accession_number: str) -> bool:
         """Check if filing is already synced"""
-        response = self.database.table("filings").select("synced").eq("accession_number", accession_number).limit(1).execute()
+        response = self.database.table("filings").select("synced").eq("accession_number", accession_number).limit(
+            1).execute()
         return len(response.data) > 0 and response.data[0].get('synced', False)
 
     def _mark_filing_synced(self, accession_number: str):
         """Mark filing as synced"""
         self.database.table("filings").update({"synced": True}).eq("accession_number", accession_number).execute()
 
-    def _get_filing_parser(self, filing: EntityFiling, company_id: int) -> BaseFiling:
+    def _get_filing_parser(self, filing: EntityFiling, company: dict) -> BaseFiling:
         if filing.form in ["10-K", "10-K/A"]:
-            return FilingTenK(filing=filing, company_id=company_id, database=self.database)
+            return FilingTenK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["10-Q", "10-Q/A"]:
-            return FilingTenQ(filing=filing, company_id=company_id, database=self.database)
+            return FilingTenQ(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["8-K", "8-K/A"]:
-            return FilingEightK(filing=filing, company_id=company_id, database=self.database)
+            return FilingEightK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["DEF 14A", "DEF 14A/A"]:
-            return FilingDefFourteenA(filing=filing, company_id=company_id, database=self.database)
+            return FilingDefFourteenA(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["6-K", "6-K/A"]:
-            return FilingSixK(filing=filing, company_id=company_id, database=self.database)
+            return FilingSixK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["20-F", "20-F/A"]:
-            return FilingTwentyF(filing=filing, company_id=company_id, database=self.database)
+            return FilingTwentyF(filing=filing, company=company, database=self.database)
 
         else:
             raise ValueError(f"Did not recognize form {filing.form}")

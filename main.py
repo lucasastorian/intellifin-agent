@@ -29,7 +29,6 @@ def signal_handler(signum, frame):
 if __name__ == '__main__':
     load_dotenv()
 
-    # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     atexit.register(cleanup_handler)

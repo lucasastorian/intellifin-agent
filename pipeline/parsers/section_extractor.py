@@ -22,6 +22,9 @@ MD_EDGE = re.compile(r'^\s*(?:\*\*|__)\s*|\s*(?:\*\*|__)\s*$')
 
 NBSP, NARROW_NBSP, ZWSP = '\u00A0', '\u202F', '\u200B'
 
+DOT_LEAD_RE = re.compile(r'^.*\.{3,}\s*\d{1,4}\s*$', re.M)  # "... 123"
+ITEM_ROWS_RE = re.compile(r'^\s*ITEM\s+\d{1,2}[A-Z]?\.?\b', re.I | re.M)
+
 FILING_STRUCTURES = {
     "10-K": {
         "PART I": ["ITEM 1", "ITEM 1A", "ITEM 1B", "ITEM 1C", "ITEM 2", "ITEM 3", "ITEM 4"],
@@ -32,6 +35,19 @@ FILING_STRUCTURES = {
     "10-Q": {
         "PART I": ["ITEM 1", "ITEM 2", "ITEM 3", "ITEM 4"],
         "PART II": ["ITEM 1", "ITEM 1A", "ITEM 2", "ITEM 3", "ITEM 4", "ITEM 5", "ITEM 6"]
+    },
+    "20-F": {
+        "PART I": [
+            "ITEM 1", "ITEM 2", "ITEM 3", "ITEM 4", "ITEM 5", "ITEM 6",
+            "ITEM 7", "ITEM 8", "ITEM 9", "ITEM 10", "ITEM 11", "ITEM 12", "ITEM 12D"
+        ],
+        "PART II": [
+            "ITEM 13", "ITEM 14", "ITEM 15",
+            # include all 16X variants explicitly so validation stays strict
+            "ITEM 16", "ITEM 16A", "ITEM 16B", "ITEM 16C", "ITEM 16D", "ITEM 16E", "ITEM 16F", "ITEM 16G", "ITEM 16H",
+            "ITEM 16I"
+        ],
+        "PART III": ["ITEM 17", "ITEM 18", "ITEM 19"]
     }
 }
 
@@ -42,6 +58,8 @@ class SectionExtractor:
         self.filing_type = filing_type
         self.structure = FILING_STRUCTURES.get(filing_type) if filing_type else None
         self.debug = debug
+
+        self._toc_locked = False
 
     def _log(self, msg: str):
         if self.debug:
@@ -95,21 +113,16 @@ class SectionExtractor:
         title = re.sub(r'\s+', ' ', title).strip()
         return title
 
-    @staticmethod
-    def _is_toc(content: str, page_num: int = 1) -> bool:
-        text = content[:6000].lower()
-        if 'table of contents' in text:
-            return True
-        if page_num > 5:
+    def _is_toc(self, content: str, page_num: int = 1) -> bool:
+        # Simple rule: within first 5 pages, if we see multiple matches, treat as TOC.
+        # “Multiple” = ≥3 ITEM rows OR ≥3 dotted-leader lines.
+        if self._toc_locked or page_num > 5:
             return False
 
-        lines = [l.strip() for l in content.split('\n') if l.strip()]
-        has_table = ('<table' in content.lower() or content.count('|') > 10 or '<tr' in content.lower())
-        leader_hits = sum(1 for l in lines if re.search(r'\.{3,}\s*\d{1,4}\s*$', l))
-        item_hits = sum(1 for l in lines if re.match(r'^\s*item\s+\d{1,2}[a-z]?\.?\b', l, re.I))
+        item_hits = len(ITEM_ROWS_RE.findall(content))
+        leader_hits = len(DOT_LEAD_RE.findall(content))
 
-        return (leader_hits >= 6 and item_hits >= 6 and len(lines) <= 200 and (has_table or page_num <= 3))
-
+        return (item_hits >= 3) or (leader_hits >= 3)
     def get_sections(self) -> List[Dict]:
         sections = []
         current_part = None

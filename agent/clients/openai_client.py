@@ -19,7 +19,8 @@ class OpenAIClient:
 
         self.tool_call_arguments = ""
 
-    async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction]):
+    async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
+                     allowed_actions: List[BaseAction] = None):
         """Streams a completion with the given messages"""
         items = [item for message in messages for item in message.openai_format()]
 
@@ -32,6 +33,19 @@ class OpenAIClient:
             "tools": [action.openai_schema for action in actions],
             "stream": True
         }
+
+        if allowed_actions and len(allowed_actions) == 1:
+            params['tool_choice'] = {"type": "function", "name": allowed_actions[0].name}
+
+        elif allowed_actions and len(allowed_actions) > 1:
+            params['tool_choice'] = {
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": [
+                    {"type": "function", "name": action.name}
+                    for action in allowed_actions
+                ]
+            }
 
         response = await self.client.responses.create(**params)
         return await self.stream_completion(response=response)

@@ -39,6 +39,8 @@ class Filings(Table):
     accession_number = Text(nullable=False, unique=True, index=True)
     num_pages = Integer(nullable=True)
     num_attachments = Integer(nullable=True)
+    title = Text(nullable=True, fts=True)  # LLM-generated title (for 8-K, 6-K)
+    summary = Text(nullable=True, fts=True, vector=True)  # LLM-generated summary (context from header baked in)
     synced = Boolean(default=False, nullable=False, index=True)
 
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -54,6 +56,8 @@ class CompanyFilings(View):
     id = Field(table="filings", field="id")
     form = Field(table="filings", field="form")
     amendment = Field(table="filings", field="amendment")
+    title = Field(table="filings", field="title")
+    summary = Field(table="filings", field="summary")
     items = Field(table="filings", field="items")
     press_release = Field(table="filings", field="press_release")
     fiscal_year = Field(table="filings", field="fiscal_year")
@@ -101,6 +105,7 @@ class FilingNotes(Table):
     id = Serial()
 
     title = Text(nullable=False)
+    preview = Text(nullable=True)
     filename = Text(nullable=False)
     content = Text(nullable=False, fts=True)
 
@@ -119,7 +124,8 @@ class FilingNoteChunks(Table):
     id = Serial()
 
     index = Integer(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
+    content = Text(nullable=False, fts=True)
+    embedding = Text(nullable=False, fts=True, vector=True)
     has_table = Boolean(nullable=False, default=False, index=True)
 
     filing_note_id = Integer(nullable=False, foreign_key="filing_notes.id", on_delete="CASCADE", index=True)
@@ -132,45 +138,27 @@ class FilingNoteChunks(Table):
     __uniques__ = [("filing_note_id", "index")]
 
 
-class FilingChunks(Table):
-    __tablename__ = "filing_chunks"
+class FilingSectionPages(Table):
+    __tablename__ = "filing_section_pages"
 
     id = Serial()
 
-    index = Integer(nullable=False)
-    page = Integer(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
-    has_table = Boolean(nullable=False, default=False, index=True)
-
-    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
-    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
-
-    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
-    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
-
-    __uniques__ = [("filing_id", "index")]
-
-
-class FilingSectionChunks(Table):
-    __tablename__ = "filing_section_chunks"
-
-    id = Serial()
-
-    section_type = Enum(choices=[
+    section = Enum(choices=[
         "business",  # 10-K Item 1
-        "risk_factors",  # 10-K Item 1A / 10-Q Item 1A
-        "legal_proceedings",  # 10-K Item 3 / 10-Q Item 1
-        "md&a",  # 10-K Item 7 / 10-Q Item 2
-        "controls_procedures",  # 10-K Item 9A / 10-Q Item 4
-        "market_risk",  # 10-K Item 7A / sometimes 10-Q Item 3
+        "risk_factors",  # 10-K Item 1A / 10-Q Part II Item 1A
         "properties",  # 10-K Item 2
-        "directors_executive",  # 10-K Item 10
+        "legal_proceedings",  # 10-K Item 3 / 10-Q Part II Item 1
+        "market_equity_matters",  # 10-K Item 5
+        "md&a",  # 10-K Item 7 / 10-Q Part I Item 2
+        "market_risk",  # 10-K Item 7A / 10-Q Part I Item 3
+        "controls_procedures",  # 10-K Item 9A / 10-Q Part I Item 4
+        "other_information",  # 10-K Item 9B
+        "unregistered_sales_equity",  # 10-Q Part II Item 2 (buybacks, private placements)
         "other"  # fallback (store raw heading)
     ], nullable=False, index=True)
 
-    index = Integer(nullable=False)
-    page = Integer(nullable=False, index=True)  # original page number
-    content = Text(nullable=False, fts=True, vector=True)
+    page = Integer(nullable=False, index=True)
+    content = Text(nullable=False, fts=True)
     has_table = Boolean(default=False, index=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
@@ -179,7 +167,41 @@ class FilingSectionChunks(Table):
     created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
     updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
 
-    __uniques__ = [("filing_id", "section_type", "index")]
+    __uniques__ = [("filing_id", "section", "page")]
+
+
+class FilingSectionChunks(Table):
+    __tablename__ = "filing_section_chunks"
+
+    id = Serial()
+
+    section = Enum(choices=[
+        "business",  # 10-K Item 1
+        "risk_factors",  # 10-K Item 1A / 10-Q Part II Item 1A
+        "properties",  # 10-K Item 2
+        "legal_proceedings",  # 10-K Item 3 / 10-Q Part II Item 1
+        "market_equity_matters",  # 10-K Item 5
+        "md&a",  # 10-K Item 7 / 10-Q Part I Item 2
+        "market_risk",  # 10-K Item 7A / 10-Q Part I Item 3
+        "controls_procedures",  # 10-K Item 9A / 10-Q Part I Item 4
+        "other_information",  # 10-K Item 9B
+        "unregistered_sales_equity",  # 10-Q Part II Item 2 (buybacks, private placements)
+        "other"  # fallback (store raw heading)
+    ], nullable=False, index=True)
+
+    index = Integer(nullable=False)
+    page = Integer(nullable=False, index=True)  # original page number
+    content = Text(nullable=False, fts=True)
+    embedding = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(default=False, index=True)
+
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_id", "section", "index")]
 
 
 class FilingPages(Table):
@@ -280,17 +302,19 @@ class CompanyFilingNoteChunks(View):
     company_symbols = Field(table="companies", field="symbols")
 
 
-class CompanyFilingChunks(View):
-    __viewname__ = "company_filing_chunks"
-    __tables__ = (FilingChunks, Filings, Companies)
+class CompanyFilingSectionChunks(View):
+    __viewname__ = "company_filing_section_chunks"
+    __tables__ = (FilingSectionChunks, Filings, Companies)
 
-    id = Field(table="filing_chunks", field="id")
-    index = Field(table="filing_chunks", field="index")
-    page = Field(table="filing_chunks", field="page")
-    content = Field(table="filing_chunks", field="content")
-    has_table = Field(table="filing_chunks", field="has_table")
+    id = Field(table="filing_section_chunks", field="id")
+    section = Field(table="filing_section_chunks", field="section")
+    index = Field(table="filing_section_chunks", field="index")
+    page = Field(table="filing_section_chunks", field="page")
+    content = Field(table="filing_section_chunks", field="content")
+    embedding = Field(table="filing_section_chunks", field="embedding")
+    has_table = Field(table="filing_section_chunks", field="has_table")
 
-    filing_id = Field(table="filing_chunks", field="filing_id")
+    filing_id = Field(table="filing_section_chunks", field="filing_id")
     form = Field(table="filings", field="form")
     amendment = Field(table="filings", field="amendment")
     items = Field(table="filings", field="items")
@@ -301,7 +325,7 @@ class CompanyFilingChunks(View):
     report_date = Field(table="filings", field="report_date")
     accession_number = Field(table="filings", field="accession_number")
 
-    company_id = Field(table="filing_chunks", field="company_id")
+    company_id = Field(table="filing_section_chunks", field="company_id")
     company_name = Field(table="companies", field="name")
     company_symbols = Field(table="companies", field="symbols")
     company_exchanges = Field(table="companies", field="exchanges")
@@ -348,6 +372,8 @@ class FilingAttachments(Table):
         default='other',
         index=True
     )
+    title = Text(nullable=True, fts=True)  # LLM-generated title
+    summary = Text(nullable=True, fts=True, vector=True)  # LLM-generated summary (context from header baked in)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -497,14 +523,14 @@ schema.add_table(FilingPages)
 schema.add_table(FilingAttachments)
 schema.add_table(FilingAttachmentPages)
 schema.add_table(FilingAttachmentChunks)
-schema.add_table(FilingChunks)
+schema.add_table(FilingSectionChunks)
 schema.add_table(FilingNoteChunks)
 
 schema.add_view(CompanyFilings)
 schema.add_view(CompanyFilingPages)
 schema.add_view(CompanyFilingNotes)
 schema.add_view(CompanyFilingNoteChunks)
-schema.add_view(CompanyFilingChunks)
+schema.add_view(CompanyFilingSectionChunks)
 schema.add_view(CompanyFinancialStatements)
 schema.add_view(CompanyFilingAttachments)
 schema.add_view(CompanyFilingAttachmentPages)

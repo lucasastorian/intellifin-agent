@@ -149,6 +149,16 @@ class Parser:
             return self._process_text_node(element)
 
         if element.name == "table":
+            rows = element.find_all("tr", recursive=True)
+            if len(rows) <= 1:
+                cells = element.find_all(["td", "th"], recursive=True)
+                text = "\n\n".join(
+                    self._clean_text(c.get_text(" ", strip=True))
+                    for c in cells
+                    if self._clean_text(c.get_text(" ", strip=True))
+                ).strip()
+                return text
+
             self.includes_table = True
             return TableParser(element).md().strip()
 
@@ -537,6 +547,35 @@ class Parser:
                 logger.debug(f"✓ Content retention: {100 * retention_ratio:.1f}%")
 
         return result
+
+    def _effective_rows(self, table: Tag) -> list[list[Tag]]:
+        """Return rows that have at least one non-empty td/th."""
+        rows = []
+        for tr in table.find_all('tr', recursive=True):
+            cells = tr.find_all(['td', 'th'], recursive=False) or tr.find_all(['td', 'th'], recursive=True)
+            texts = [self._clean_text(c.get_text(" ", strip=True)) for c in cells]
+            if any(texts):
+                rows.append(cells)
+        return rows
+
+    def _one_row_table_to_text(self, cells: list[Tag]) -> str:
+        """Flatten a 1-row table to plain text; upgrade to header when possible."""
+        texts = [self._clean_text(c.get_text(" ", strip=True)) for c in cells]
+        if not texts:
+            return ""
+
+        first = texts[0]
+        if (m := ITEM_HEADER_CELL_RE.match(first)):
+            num = m.group(1).upper()
+            title = next((t for t in texts[1:] if t), "")
+            return f"ITEM {num}. {title}".strip()
+
+        if (m := PART_HEADER_CELL_RE.match(first)):
+            roman = m.group(1).upper()
+            return f"PART {roman}"
+
+        # generic flatten (avoid markdown pipes which might be misread later)
+        return " ".join(t for t in texts if t).strip()
 
     def markdown(self) -> str:
         pages = self.get_pages()

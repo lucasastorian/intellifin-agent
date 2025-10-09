@@ -6,11 +6,12 @@ from pipeline.chunker.markdown_blocks import BaseBlock
 class MarkdownChunk:
     """Represents a chunk of markdown content that can be embedded"""
 
-    def __init__(self, blocks: List[BaseBlock]):
-        """Initialize a markdown chunk with blocks and optional metadata"""
+    def __init__(self, blocks: List[BaseBlock], header: Optional[str] = None):
+        """Initialize a markdown chunk with blocks and optional header for embedding"""
         self.vector: Optional[List[float]] = None
         self.blocks = blocks
         self.page = blocks[0].page
+        self.header = header
 
     def set_vector(self, vector: List[float]):
         """Set the vector embedding for this chunk"""
@@ -46,8 +47,9 @@ class MarkdownChunk:
 
     @property
     def embedding_text(self) -> str:
-        """Get the text to use for embedding"""
-        # NOTE: See if you can add context here to improve embedding quality !
+        """Get the text to use for embedding, with optional header prepended"""
+        if self.header:
+            return f"{self.header}\n\n...\n\n{self.content}"
         return self.content
 
     @property

@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from schema import schema
 from database import Database
+from agent.action_response import ActionResponse, ActionFollowUp
 from pipeline.company_provisioner import CompanyProvisioner
 from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
@@ -14,6 +15,7 @@ from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmen
 
 
 class Agent:
+
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20):
@@ -29,44 +31,85 @@ class Agent:
         provisioner.provision()
 
     async def run(self, query: str) -> Optional[str]:
-        """Runs the assistant with the given query"""
+        """Orchestrates agent iterations (horizontal limit via max_iter)"""
         self.messages.append(Message(role="user", status="completed", content=query))
 
-        actions = [
-            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+        base_actions = [
+            # ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            #
+            # ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
+        dynamic_actions = []
 
         while self.num_iter < self.max_iter:
-            terminate = await self.step(actions=actions)
-            if terminate:
+            optional_actions = await self.execute_followups(
+                actions=base_actions + dynamic_actions,
+                depth=0
+            )
+
+            if optional_actions is None:
                 return self.messages[-1].content
 
+            dynamic_actions = optional_actions
             self.num_iter += 1
 
         return None
 
-    async def step(self, actions: List[BaseAction]):
+    async def execute_followups(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None,
+                                depth: int = 0, max_depth: int = 10) -> Optional[List[BaseAction]]:
+        """
+        Recursively processes forced follow-up chains (vertical limit via max_depth).
+        Returns optional follow-up actions to persist for next iteration.
+        Returns None if terminal (no tool calls).
+        """
+        if depth > max_depth:
+            raise RuntimeError(f"Exceeded max follow-up depth {max_depth}")
+
+        follow_ups = await self.step(actions=actions, allowed_actions=allowed_actions)
+
+        if follow_ups is None:
+            return None
+
+        optional_actions = []
+
+        for follow_up in follow_ups:
+            if follow_up.force:
+                recursive_optional = await self.execute_followups(
+                    actions=actions + follow_up.actions,
+                    allowed_actions=follow_up.actions,
+                    depth=depth + 1,
+                    max_depth=max_depth
+                )
+
+                if recursive_optional:
+                    optional_actions.extend(recursive_optional)
+            else:
+                optional_actions.extend(follow_up.actions)
+
+        return optional_actions
+
+    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[List[ActionFollowUp]]:
         """Executes a single step in the agent loop"""
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
-                                              actions=actions)
+                                              actions=actions, allowed_actions=allowed_actions)
         self.messages.append(completion)
-        terminate = await self._call_actions(completion=completion, actions=actions)
+        follow_ups = await self._call_actions(completion=completion, actions=actions)
 
-        return terminate
+        return follow_ups
 
-    async def _call_actions(self, completion: Message, actions: List[BaseAction]) -> bool:
+    async def _call_actions(self, completion: Message, actions: List[BaseAction]) -> Optional[List[ActionFollowUp]]:
         """Calls the relevant actions and returns whether to terminate"""
+        follow_ups = []
+
         if completion.actions is None:
-            return True
+            return None
 
         for called_action in completion.actions:
             action = self._find_action(name=called_action.name, actions=actions)
@@ -74,10 +117,12 @@ class Agent:
             if not action:
                 self._handle_action_not_found(called_action=called_action)
             else:
-                message = await action.call(action=called_action)
-                self.messages.append(message)
+                response = await action.call(action=called_action)
+                self.messages.append(response.message)
+                if response.follow_up:
+                    follow_ups.append(response.follow_up)
 
-        return False
+        return follow_ups
 
     @staticmethod
     def _find_action(name: str, actions: List[BaseAction]) -> Optional[BaseAction]:
