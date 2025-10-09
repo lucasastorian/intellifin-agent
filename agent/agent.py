@@ -14,7 +14,6 @@ from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmen
 
 
 class Agent:
-
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20):
@@ -31,7 +30,6 @@ class Agent:
 
     async def run(self, query: str) -> Optional[str]:
         """Runs the assistant with the given query"""
-        self.messages.append(Message(role="system", status="completed", content=SystemPrompt().format()))
         self.messages.append(Message(role="user", status="completed", content=query))
 
         actions = [
@@ -39,11 +37,9 @@ class Agent:
             ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # SearchAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),  # Disabled for now
+
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ReadPressReleaseAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
@@ -60,7 +56,8 @@ class Agent:
 
     async def step(self, actions: List[BaseAction]):
         """Executes a single step in the agent loop"""
-        completion = await self.client.stream(messages=self.messages, actions=actions)
+        completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
+                                              actions=actions)
         self.messages.append(completion)
         terminate = await self._call_actions(completion=completion, actions=actions)
 

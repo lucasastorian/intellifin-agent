@@ -8,7 +8,7 @@ from agent.message import Action, Message
 
 
 class SearchFilings(BaseModel):
-    """Vector search across main filing body content (MD&A, risk factors, business sections, legal matters)
+    """Search across filings, including (MD&A, risk factors, business sections, legal matters)
 
     Use for: Business narrative, strategy, operations, qualitative discussion, regulatory matters
     Content: MD&A, Risk Factors, Business Description, Legal Proceedings, Controls

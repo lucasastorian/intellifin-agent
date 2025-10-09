@@ -28,6 +28,52 @@ class BaseFiling(ABC):
         """Upserts the filing and associated data to local DB"""
         raise NotImplementedError
 
+    @staticmethod
+    def infer_attachment_type(exhibit_number: str) -> str:
+        """Infer attachment type from exhibit number
+
+        Args:
+            exhibit_number: Exhibit number without "EX-" prefix (e.g., "99.1", "10.2", "3.1")
+
+        Returns:
+            Type string: press_release, material_contract, corporate_governance, debt_securities,
+                        merger_acquisition, subsidiaries, legal_compliance, or other
+        """
+        # Extract prefix (e.g., "99" from "99.1", "10" from "10.2")
+        prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
+
+        # Press releases - EX-99, EX-99.1, EX-99.2, etc.
+        if prefix == "99":
+            return "press_release"
+
+        # Material contracts - EX-10, EX-10.1, etc.
+        elif prefix == "10":
+            return "material_contract"
+
+        # Corporate governance - EX-3.x (bylaws, charters)
+        elif prefix == "3":
+            return "corporate_governance"
+
+        # Debt/securities - EX-4.x (indentures, rights)
+        elif prefix == "4":
+            return "debt_securities"
+
+        # M&A - EX-2.x (merger/acquisition agreements)
+        elif prefix == "2":
+            return "merger_acquisition"
+
+        # Subsidiaries - EX-21
+        elif prefix == "21":
+            return "subsidiaries"
+
+        # Legal/compliance - EX-1 (underwriting), EX-5 (legal opinions), EX-23 (consents)
+        elif prefix in ("1", "5", "23"):
+            return "legal_compliance"
+
+        # Everything else
+        else:
+            return "other"
+
     def exists(self):
         """Returns True if an entry for the filing exists in the DB"""
         return len(

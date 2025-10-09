@@ -1,95 +1,110 @@
 import openai
 from jiter import from_json
+from openai import AsyncStream
 from typing import Literal, List
-from openai._streaming import AsyncStream
-from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 
 from agent.actions import BaseAction
-from agent.message import Message, Action
+from agent.message import Message, Action, Thought
 
 
 class OpenAIClient:
 
-    def __init__(self, model: str = "gpt-5", temperature: float = 1.0, provider: Literal['OpenAI'] = 'OpenAI'):
+    def __init__(self, model: str = "gpt-5", temperature: float = 1.0,
+                 reasoning_effort: Literal['low', 'medium', 'high', 'none'] = 'medium'):
         self.model = model
         self.temperature = temperature
-        self.provider = provider
+        self.reasoning_effort = reasoning_effort
 
         self.client = openai.AsyncOpenAI()
 
         self.tool_call_arguments = ""
 
-    async def stream(self, messages: List[Message], actions: List[BaseAction]):
+    async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction]):
         """Streams a completion with the given messages"""
-        messages = [message.format() for message in messages]
+        items = [item for message in messages for item in message.openai_format()]
 
         params = {
             "model": self.model,
             "temperature": self.temperature,
-            "messages": messages,
+            "instructions": system_prompt,
+            "input": items,
+            "reasoning": {"effort": self.reasoning_effort, "summary": "auto"},
             "tools": [action.openai_schema for action in actions],
             "stream": True
         }
 
-        response = await self.client.chat.completions.create(**params)
+        response = await self.client.responses.create(**params)
         return await self.stream_completion(response=response)
 
     async def stream_completion(self, response: AsyncStream):
         """Streams a chat completion to the console"""
-        completion = Message(role="assistant", status="in_progress", content="")
+        completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[])
 
-        async for chunk in response:
-            if chunk.choices:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    completion.content += content
-                    print(content, sep="", end="")
+        async for event in response:
 
-                if json_chunk := chunk.choices[0].delta.tool_calls:
-                    tool_call_chunk = json_chunk[0]
-                    function_name = tool_call_chunk.function.name
+            if event.type == 'response.created':
+                completion.external_id = event.response.id
 
-                    if function_name:
-                        completion = self._create_action(completion=completion, tool_call=tool_call_chunk)
-                    else:
-                        completion = self._parse_action(completion=completion, tool_call=tool_call_chunk)
+            elif event.type == 'response.in_progress':
+                pass
 
-            if chunk.usage:
-                completion.prompt_tokens = chunk.usage.prompt_tokens
-                completion.completion_tokens = chunk.usage.completion_tokens
+            elif event.type == 'response.output_item.added':
 
-        completion.status = "completed"
+                if event.item.type == 'reasoning':
+                    completion.thoughts.append(Thought(id=event.item.id, summaries=[]))
 
-        # Add newline after streaming completes
-        if completion.content:
-            print()
+                if event.item.type == 'function_call':
+                    self.tool_call_arguments = ""
+                    action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={})
+                    completion.actions.append(action)
 
-        return completion
+                if event.item.type == 'message':
+                    completion.external_id = event.item.id
 
-    def _create_action(self, completion: Message, tool_call: ChoiceDeltaToolCall):
-        """Creates a new action"""
-        if completion.actions is None:
-            completion.actions = []
+            elif event.type == 'response.reasoning_summary_part.added':
+                completion.thoughts[-1].summaries.append("")
 
-        action = Action(id=tool_call.id, name=tool_call.function.name, status="streaming", body={})
-        completion.actions.append(action)
+            elif event.type == 'response.reasoning_summary_text.delta':
+                completion.thoughts[-1].summaries[-1] += event.delta
 
-        self.tool_call_arguments = ""
+            elif event.type == 'response.reasoning_summary_text.done':
+                # Identical to previous summary deltas
+                completion.thoughts[-1].summaries[-1] = event.text
 
-        if tool_call.function.arguments:
-            return self._parse_action(completion=completion, tool_call=tool_call)
+            elif event.type == 'response.reasoning_summary_part.done':
+                # Identical to previous summary deltas
+                completion.thoughts[-1].summaries[-1] = event.part.text
 
-        return completion
+            elif event.type == 'response.function_call_arguments.delta':
+                self.tool_call_arguments += event.delta
+                body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
+                                      partial_mode="trailing-strings")
 
-    def _parse_action(self, completion: Message, tool_call: ChoiceDeltaToolCall):
-        """Parsing action"""
-        self.tool_call_arguments += tool_call.function.arguments
+                if type(body_json) is not dict:
+                    continue
 
-        task_json = from_json((self.tool_call_arguments.strip() or "{}").encode(), partial_mode="trailing-strings")
+                completion.actions[-1].body = body_json
 
-        if type(task_json) is not dict:
-            return
+            elif event.type == 'response.output_text.delta':
+                completion.content += event.delta
+                print(event.delta, sep="", end="")
 
-        completion.actions[-1].body = task_json
+            elif event.type == 'response.output_text.done':
+                pass
+
+            elif event.type == 'response.content_part.done':
+                pass
+
+            elif event.type == 'response.output_item.done':
+                pass
+
+            elif event.type == 'response.completed':
+                usage = event.response.usage
+
+                completion.prompt_tokens = usage.input_tokens
+                completion.thinking_tokens = usage.output_tokens_details.reasoning_tokens
+                completion.completion_tokens = usage.output_tokens - completion.thinking_tokens
+
+        completion.status = 'completed'
 
         return completion

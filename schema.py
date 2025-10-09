@@ -151,6 +151,37 @@ class FilingChunks(Table):
     __uniques__ = [("filing_id", "index")]
 
 
+class FilingSectionChunks(Table):
+    __tablename__ = "filing_section_chunks"
+
+    id = Serial()
+
+    section_type = Enum(choices=[
+        "business",  # 10-K Item 1
+        "risk_factors",  # 10-K Item 1A / 10-Q Item 1A
+        "legal_proceedings",  # 10-K Item 3 / 10-Q Item 1
+        "md&a",  # 10-K Item 7 / 10-Q Item 2
+        "controls_procedures",  # 10-K Item 9A / 10-Q Item 4
+        "market_risk",  # 10-K Item 7A / sometimes 10-Q Item 3
+        "properties",  # 10-K Item 2
+        "directors_executive",  # 10-K Item 10
+        "other"  # fallback (store raw heading)
+    ], nullable=False, index=True)
+
+    index = Integer(nullable=False)
+    page = Integer(nullable=False, index=True)  # original page number
+    content = Text(nullable=False, fts=True, vector=True)
+    has_table = Boolean(default=False, index=True)
+
+    filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("filing_id", "section_type", "index")]
+
+
 class FilingPages(Table):
     __tablename__ = "filing_pages"
 
@@ -310,7 +341,13 @@ class FilingAttachments(Table):
     filename = Text(nullable=False)
     description = Text(nullable=True)
     num_pages = Integer(nullable=True)
-    is_press_release = Boolean(default=False, nullable=False)
+    type = Enum(
+        choices=['press_release', 'material_contract', 'corporate_governance', 'debt_securities',
+                 'merger_acquisition', 'subsidiaries', 'legal_compliance', 'other'],
+        nullable=False,
+        default='other',
+        index=True
+    )
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -365,7 +402,7 @@ class CompanyFilingAttachments(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     filename = Field(table="filing_attachments", field="filename")
     description = Field(table="filing_attachments", field="description")
-    is_press_release = Field(table="filing_attachments", field="is_press_release")
+    attachment_type = Field(table="filing_attachments", field="type")
 
     filing_id = Field(table="filing_attachments", field="filing_id")
     form = Field(table="filings", field="form")
@@ -397,7 +434,7 @@ class CompanyFilingAttachmentPages(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     attachment_filename = Field(table="filing_attachments", field="filename")
     attachment_description = Field(table="filing_attachments", field="description")
-    is_press_release = Field(table="filing_attachments", field="is_press_release")
+    attachment_type = Field(table="filing_attachments", field="type")
 
     filing_id = Field(table="filing_attachment_pages", field="filing_id")
     form = Field(table="filings", field="form")
@@ -431,7 +468,7 @@ class CompanyFilingAttachmentChunks(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     attachment_filename = Field(table="filing_attachments", field="filename")
     attachment_description = Field(table="filing_attachments", field="description")
-    is_press_release = Field(table="filing_attachments", field="is_press_release")
+    attachment_type = Field(table="filing_attachments", field="type")
 
     filing_id = Field(table="filing_attachment_chunks", field="filing_id")
     form = Field(table="filings", field="form")

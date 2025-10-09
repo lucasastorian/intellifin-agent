@@ -64,8 +64,8 @@ class FilingTenQ(BaseFiling):
             if not pages:
                 continue
 
-            # Mark EX-99* exhibits as press releases
-            is_press_release = exhibit_number.startswith("99")
+            # Infer attachment type from exhibit number
+            attachment_type = self.infer_attachment_type(exhibit_number)
 
             # Upsert attachment metadata
             attachment_response = self.database.table("filing_attachments").upsert({
@@ -73,7 +73,7 @@ class FilingTenQ(BaseFiling):
                 "filename": document.document or f"ex-{exhibit_number}",
                 "description": document.description,
                 "num_pages": len(pages),
-                "is_press_release": is_press_release,
+                "type": attachment_type,
                 "filing_id": filing_id,
                 "company_id": self.company_id
             }, on_conflict="filing_id,exhibit_number").execute()

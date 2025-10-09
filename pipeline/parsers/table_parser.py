@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import logging
 import pandas as pd
@@ -7,7 +9,20 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-BULLETS = {"•", "●", "◦", "–", "-", "—", "·", ""}
+BULLETS = {"•", "●", "◦", "–", "-", "—", "·", ""}
+
+# Robust numeric pattern for SEC filings
+# Matches: $1,234.56, (1,234), -1234, 12.5%, etc.
+NUMERIC_RE = re.compile(r"""
+    ^\s*
+    [\(\[]?                      # optional opening paren/bracket
+    [\-—–]?\s*                   # optional dash
+    [$€£¥]?\s*                   # optional currency
+    \d+(?:[.,]\d{3})*           # integer part (with or without thousands)
+    (?:[.,]\d+)?                # decimals
+    \s*%?                       # optional percent
+    [\)\]]?\s*$                 # optional closing paren/bracket
+""", re.X)
 
 
 @dataclass

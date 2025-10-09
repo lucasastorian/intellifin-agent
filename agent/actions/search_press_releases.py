@@ -112,10 +112,10 @@ class SearchPressReleasesAction(BaseAction):
                 self.database
                 .table("company_filing_attachment_chunks")
                 .select(
-                    "id,filing_id,attachment_id,page,content,index,has_table,exhibit_number,form,filing_date,report_date,company_name,company_symbols")
+                    "id,filing_id,attachment_id,page,content,index,has_table,exhibit_number,attachment_type,form,filing_date,report_date,company_name,company_symbols")
                 .contains("company_symbols", args.symbol)
                 .in_("form", ['8-K', '8-K/A'])
-                .eq("is_press_release", True)
+                .eq("attachment_type", "press_release")
                 .gte("report_date", args.start_date)
                 .lte("report_date", args.end_date)
             )

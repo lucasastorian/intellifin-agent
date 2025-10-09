@@ -54,13 +54,15 @@ class BaseAction(ABC):
 
             # Only show sync message if filings were actually synced
             if synced_count > 0:
-                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}", flush=True)
+                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}",
+                      flush=True)
             elif synced_count == 0 and not company.company.not_found:
                 # Company found but nothing to sync (all already synced)
                 pass  # No message
             else:
                 # Company not found
-                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found", flush=True)
+                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
+                      flush=True)
                 not_found.append(symbol)
 
         return not_found
@@ -110,8 +112,8 @@ class BaseAction(ABC):
         print(f"  {self._c('✗', 'red')} {error}", flush=True)
 
     @property
-    def openai_schema(self) -> dict:
-        """Converts the schema to an OpenAI compatible tool call format"""
+    def openai_legacy_schema(self) -> dict:
+        """Converts the schema to an OpenAI Chat Completions tool call format"""
         json_schema = self.schema.model_json_schema(mode="serialization")
 
         return {
@@ -124,5 +126,21 @@ class BaseAction(ABC):
                     "properties": json_schema['properties'],
                     "required": json_schema.get('required', [])
                 }
+            }
+        }
+
+    @property
+    def openai_schema(self) -> dict:
+        """Converts the schema to an OpenAI Responses API tool call format"""
+        json_schema = self.schema.model_json_schema(mode="serialization")
+
+        return {
+            "type": "function",
+            "name": self.schema.__name__,
+            "description": json_schema['description'],
+            "parameters": {
+                "type": "object",
+                "properties": json_schema['properties'],
+                "required": json_schema.get('required', [])
             }
         }
