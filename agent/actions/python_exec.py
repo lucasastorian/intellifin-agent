@@ -1,4 +1,5 @@
 """Safe Python expression evaluator for calculations"""
+import ast
 import math
 import traceback
 from pydantic import BaseModel, Field, ValidationError
@@ -11,12 +12,24 @@ from agent.action_response import ActionResponse
 class PythonExec(BaseModel):
     """Execute Python code for mathematical calculations (stateless, single-execution)
 
-    Use this tool to perform one-off calculations using Python syntax:
+    Use this tool to perform calculations using full Python syntax:
     - Basic math: `100 * 1.08`, `1000 / 12`, `2 ** 10`
-    - Variables: `revenue = 1000; margin = 0.25; revenue * margin`
+    - Variables: `revenue = 1000\nmargin = 0.25\nrevenue * margin`
     - Functions: `round(3.14159, 2)`, `abs(-5)`, `max(10, 20, 30)`
     - Math library: `math.sqrt(16)`, `math.log(100)`, `math.exp(2)`
-    - Multi-step: Use semicolons or newlines. Last expression is returned as result.
+    - Comments: `# This is a comment\nresult = 100 * 1.08\nresult`
+    - Loops/conditions: Full Python control flow is supported
+    - Multi-step: Use newlines. Last expression is returned as result.
+
+    Examples:
+    ```python
+    # Calculate member-months by region
+    ucan = {'Q1': {'rev': 4224, 'arm': 17.30}, 'Q2': {'rev': 4296, 'arm': 17.17}}
+    total_mm = 0
+    for q, data in ucan.items():
+        total_mm += data['rev'] / data['arm']
+    total_mm  # This expression will be returned
+    ```
 
     IMPORTANT Limitations:
     - No session state: Each call is isolated. Variables from previous PythonExec calls are NOT available.
@@ -86,39 +99,38 @@ class PythonExecAction(BaseAction):
         self.log_start("PythonExec", f"Code: {code_preview}", thought=args.thought)
 
         try:
-            # Replace semicolons with newlines for multi-statement support
-            code = args.code.replace(';', '\n')
-
             # Create restricted namespace
             namespace = {'__builtins__': self.SAFE_BUILTINS}
 
-            # Try to execute as expression first (single-line calculations)
+            # Parse code into AST to properly handle multi-line code and comments
             try:
-                result = eval(compile(code, '<string>', 'eval'), namespace)
-            except SyntaxError:
-                # Code contains statements (assignments, multiple lines, etc.)
-                # Split into lines and try to capture last expression
-                lines = [line.strip() for line in code.strip().split('\n') if line.strip()]
+                parsed = ast.parse(args.code, mode='exec')
+            except SyntaxError as e:
+                raise SyntaxError(f"Invalid Python syntax: {e}")
 
-                if len(lines) == 0:
-                    result = None
-                elif len(lines) == 1:
-                    # Single statement - just exec it
-                    exec(compile(code, '<string>', 'exec'), namespace)
-                    result = None
+            # Check if the last statement is an expression we can capture
+            result = None
+            if parsed.body:
+                last_node = parsed.body[-1]
+
+                # If last statement is an expression, capture its value
+                if isinstance(last_node, ast.Expr):
+                    # Execute everything except the last expression
+                    if len(parsed.body) > 1:
+                        statements = ast.Module(body=parsed.body[:-1], type_ignores=[])
+                        exec(compile(statements, '<string>', 'exec'), namespace)
+
+                    # Evaluate the last expression
+                    expr = ast.Expression(body=last_node.value)
+                    result = eval(compile(expr, '<string>', 'eval'), namespace)
                 else:
-                    # Execute all but last line
-                    statements = '\n'.join(lines[:-1])
-                    exec(compile(statements, '<string>', 'exec'), namespace)
-
-                    # Try to evaluate last line as expression
-                    last_line = lines[-1]
-                    try:
-                        result = eval(compile(last_line, '<string>', 'eval'), namespace)
-                    except:
-                        # Last line is also a statement
-                        exec(compile(last_line, '<string>', 'exec'), namespace)
-                        result = None
+                    # Last statement is not an expression (e.g., assignment, loop, etc.)
+                    # Just execute everything
+                    exec(compile(parsed, '<string>', 'exec'), namespace)
+                    result = None
+            else:
+                # Empty code
+                result = None
 
             # Format result
             if isinstance(result, float):
