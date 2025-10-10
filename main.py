@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''In FY23 and FY24, did General Mills beat or miss beginning of year organic net sales growth guidance? What is the guidance for FY25?''')
+                        default='''How has Apple's (AAPL) stance' regarding supply chain risks evolved in the past 5 years?''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')

@@ -147,3 +147,18 @@ class BaseAction(ABC):
                 "required": json_schema.get('required', [])
             }
         }
+
+    @property
+    def anthropic_schema(self) -> dict:
+        """Converts the Action to an Anthropic compatible schema"""
+        json_schema = self.schema.model_json_schema(mode="serialization")
+
+        return {
+            "name": self.schema.__name__,
+            "description": json_schema['description'],
+            "input_schema": {
+                "type": "object",
+                "properties": json_schema['properties'],
+                "required": json_schema.get('required', [])
+            }
+        }

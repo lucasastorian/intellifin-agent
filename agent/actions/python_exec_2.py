@@ -202,10 +202,10 @@ except:
             )
 
     @staticmethod
-    def validate(action: Action) -> PythonKernelExec:
+    def validate(action: Action) -> PythonExec:
         """Validate action against schema"""
         try:
-            return PythonKernelExec(**action.body)
+            return PythonExec(**action.body)
         except ValidationError as e:
             raise RuntimeError(f"Validation failed: {e}") from e
 

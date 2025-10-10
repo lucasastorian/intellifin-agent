@@ -10,6 +10,8 @@ from agent.actions.read_press_release import ReadPressReleaseAction
 from agent.actions.read_attachment import ReadAttachmentAction
 from agent.actions.view_financial_statements import ViewFinancialStatementsAction
 from agent.actions.python_exec_2 import PythonExecAction
+from agent.actions.search.search_filing_excerpts import SearchFilingSectionsAction
+
 
 __all__ = [
     "BaseAction",
@@ -24,4 +26,5 @@ __all__ = [
     "ReadAttachmentAction",
     "ViewFinancialStatementsAction",
     "PythonExecAction",
+    "SearchFilingSectionsAction"
 ]

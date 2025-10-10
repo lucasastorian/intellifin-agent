@@ -11,11 +11,10 @@ from agent.clients.openai_client import OpenAIClient
 from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, SearchFilingsAction,
                            SearchPressReleasesAction, SearchFilingNotesAction,  # SearchAttachmentsAction,
                            ReadFilingAction, ReadPressReleaseAction, ReadAttachmentAction,
-                           ViewFinancialStatementsAction, PythonExecAction)
+                           ViewFinancialStatementsAction, PythonExecAction, SearchFilingSectionsAction)
 
 
 class Agent:
-
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20):
@@ -43,13 +42,15 @@ class Agent:
             #
             # ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             # ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
+
         dynamic_actions = []
 
         while self.num_iter < self.max_iter:
-            optional_actions = await self.execute_followups(
+            optional_actions = await self.navigate_sequence(
                 actions=base_actions + dynamic_actions,
                 depth=0
             )
@@ -62,10 +63,10 @@ class Agent:
 
         return None
 
-    async def execute_followups(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None,
+    async def navigate_sequence(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None,
                                 depth: int = 0, max_depth: int = 10) -> Optional[List[BaseAction]]:
         """
-        Recursively processes forced follow-up chains (vertical limit via max_depth).
+        Navigates through a sequence of steps with recursive forced follow-ups (vertical limit via max_depth).
         Returns optional follow-up actions to persist for next iteration.
         Returns None if terminal (no tool calls).
         """
@@ -81,7 +82,7 @@ class Agent:
 
         for follow_up in follow_ups:
             if follow_up.force:
-                recursive_optional = await self.execute_followups(
+                recursive_optional = await self.navigate_sequence(
                     actions=actions + follow_up.actions,
                     allowed_actions=follow_up.actions,
                     depth=depth + 1,
@@ -95,7 +96,8 @@ class Agent:
 
         return optional_actions
 
-    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[List[ActionFollowUp]]:
+    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[
+        List[ActionFollowUp]]:
         """Executes a single step in the agent loop"""
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
                                               actions=actions, allowed_actions=allowed_actions)
@@ -119,10 +121,25 @@ class Agent:
             else:
                 response = await action.call(action=called_action)
                 self.messages.append(response.message)
+
+                # Apply context refinement if requested
+                if response.context_refinement:
+                    self._apply_context_refinement(response.context_refinement)
+
                 if response.follow_up:
                     follow_ups.append(response.follow_up)
 
         return follow_ups
+
+    def _apply_context_refinement(self, refinement):
+        """Refine a previous message's content by ID"""
+        from agent.action_response import ContextRefinement
+
+        for i, msg in enumerate(self.messages):
+            if msg.id == refinement.message_id:
+                # Refine content while preserving other fields
+                self.messages[i].content = refinement.refined_content
+                return
 
     @staticmethod
     def _find_action(name: str, actions: List[BaseAction]) -> Optional[BaseAction]:

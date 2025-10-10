@@ -1,5 +1,6 @@
 import json
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from typing import Literal, List
 
 
@@ -34,8 +35,37 @@ class Message:
     external_id: str = None
     error: bool = False  # Set flag to false if the tool message with an error
 
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+    def anthropic_format(self) -> dict:
+        """Formats a message for the Anthropic Client"""
+        if self.role == "tool":
+            return {"type": "tool_result", "tool_use_id": self.action_id, "content": self.content}
+
+        elif self.role == "assistant":
+            content_blocks = []
+
+            if self.thoughts:
+                thinking_blocks = [{"type": "thinking", "thinking": thought.summaries[0],
+                                    "signature": thought.id} for thought in self.thoughts]
+                content_blocks += thinking_blocks
+
+            if self.content:
+                content_blocks.append({"type": "text", "text": self.content})
+
+            if self.actions:
+                action_blocks = [{"type": "tool_use", "id": self.action_id,
+                                  "name": action.name, "input": action.body} for action in self.actions]
+
+                content_blocks += action_blocks
+
+            return {"role": "assistant", "content": content_blocks}
+
+        else:
+            return {"role": self.role, "content": self.content}
+
     def openai_format(self) -> List[dict]:
-        """Formats the message as a list of items for the OpenAI Client"""
+        """Formats the message as a list of items for the OpenAI Client (Responses API)"""
         if self.role == "tool":
             return [{"call_id": self.action_id, "output": self.content, "type": "function_call_output"}]
 
