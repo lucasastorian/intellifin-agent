@@ -74,6 +74,14 @@ class VectorStore:
         total = self.id_file.stat().st_size // 8
         return total - len(self.tombstones)
 
+    def has_id(self, id_: int) -> bool:
+        """Check if an ID exists in the store (ignoring tombstones)"""
+        if self.id_file.stat().st_size == 0:
+            return False
+        with self._lock:
+            ids = np.memmap(self.id_file, dtype=np.int64, mode='r')
+            return int(id_) in ids
+
     def add(self, id_: int, vec: np.ndarray):
         """Append a single vector"""
         self.add_batch([id_], [vec])

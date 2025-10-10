@@ -8,14 +8,13 @@ from typing import List, Optional
 class EmbeddingCache:
     """Simple LMDB-based cache for embeddings"""
 
-    def __init__(self, cache_dir: str = "./cache", model: str = "voyage-3.5-lite"):
+    def __init__(self, cache_dir: str = "./cache", model: str = "voyage-3.5-lite", dimensions: int = 512):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Separate cache per model
-        db_path = self.cache_dir / f"embeddings_{model.replace('.', '_').replace('-', '_')}.lmdb"
+        model_key = model.replace('.', '_').replace('-', '_')
+        db_path = self.cache_dir / f"embeddings_{model_key}_dim{dimensions}.lmdb"
 
-        # 10GB max size, writemap=True for thread safety, max_readers for concurrent reads
         self.env = lmdb.open(
             str(db_path),
             map_size=10*1024*1024*1024,

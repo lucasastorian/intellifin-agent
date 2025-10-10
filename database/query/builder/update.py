@@ -79,9 +79,13 @@ class UpdateBuilder(PredMixin):
             if not texts:
                 continue
 
-            # Tombstone old vectors, add new ones
+            # Get vector store
             vector_store = self.db.get_or_create_vector_store(self.table, field_name)
-            vector_store.tombstone_batch(ids)
+
+            # Only tombstone IDs that actually exist in the store (for updates, not initial inserts)
+            existing_ids = [id_ for id_ in ids if vector_store.has_id(id_)]
+            if existing_ids:
+                vector_store.tombstone_batch(existing_ids)
 
             # Batch embed new content
             embeddings = self.db.embedder.embed(texts)
@@ -89,3 +93,8 @@ class UpdateBuilder(PredMixin):
 
             # Append new vectors
             vector_store.add_batch(ids, vectors)
+
+            # Remove any tombstones for these IDs (in case they were tombstoned above)
+            if existing_ids:
+                vector_store.tombstones.difference_update(existing_ids)
+                vector_store._save_tombstones()

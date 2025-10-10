@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''How has Apple's (AAPL) stance' regarding supply chain risks evolved in the past 5 years?''')
+                        default='''How has US Steel addressed its planned merger with Nippon Steel and its effect on its business operations?''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--temperature', type=float, default=1.0, help='Temperature (default: 1.0)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')

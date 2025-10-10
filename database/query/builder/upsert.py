@@ -136,10 +136,14 @@ class UpsertBuilder:
         if not table_cls:
             return
 
-        # Find vector-enabled text fields
+        # Find vector-enabled text fields that were actually provided in input
+        input_fields = set()
+        for row in self.rows:
+            input_fields.update(row.keys())
+
         vector_fields = []
         for field_name, field in table_cls.get_fields().items():
-            if getattr(field, 'vector', False):
+            if getattr(field, 'vector', False) and field_name in input_fields:
                 vector_fields.append(field_name)
 
         if not vector_fields:

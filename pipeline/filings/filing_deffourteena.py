@@ -5,16 +5,14 @@ from pipeline.filings.base_filing import BaseFiling
 
 class FilingDefFourteenA(BaseFiling):
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the DEF 14A filing"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         filing_id = self._upsert_filing(xbrl=xbrl)
-        pages = self._upsert_filing_pages(filing_id=filing_id)
+        pages = await self._upsert_filing_pages(filing_id=filing_id)
 
-        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
-
-        # Update filing counts after all processing is complete
+        # DEF 14A filings are not chunked
         self._update_filing_counts(filing_id=filing_id)
 
     def _upsert_filing(self, xbrl: XBRL) -> int:

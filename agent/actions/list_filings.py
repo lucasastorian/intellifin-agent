@@ -13,13 +13,13 @@ AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 class ListFilings(BaseModel):
     """List available SEC filings based on the ticker symbol, forms, and start report date (limited to 50 filings)
 
-    - Use this first to identify filings before reading or searching text via SearchContent
-    - Returns a Markdown table with: id, form, title (for 8-K/6-K), items (for 8-K), pages, attachments, notes,
+    - Use this first to identify filings before reading content via ReadFiling or searching via Search actions
+    - Returns a Markdown table with: id, form, title (for 8-K/6-K), items (for 8-K), pages, attachments count,
         report_date, filing_date, fiscal_period, fiscal_year
-    - Optionally include nested rows showing attachments (with LLM-generated titles) and notes (with previews)
     - Results sorted by filing_date in descending order
     - For each form - will return both original submissions and amendments where applicable
     - The fiscal period (Q1/Q2/Q3/FY) and fiscal year returned in the table are from the companies' own fiscal calendar
+    - Use ReadFiling action with the filing ID to explore attachments, notes, and content
     """
     thought: str = Field(
         description="Describe what you're searching for and how it will help you achieve your objective"
@@ -29,10 +29,10 @@ class ListFilings(BaseModel):
     start_date: str = Field(..., description="Filter by report_date >= this ISO date 'YYYY-MM-DD'.")
     end_date: Optional[str] = Field(..., description="Filter by report_date <= this ISO date 'YYYY-MM-DD'. "
                                                      "Defaults to today.")
-    include_attachments: Optional[bool] = Field(description="Whether to list the attachments for each filing",
-                                                default=False)
-    include_notes: Optional[bool] = Field(description="Whether to list the notes available for each filing",
-                                          default=False)
+    # include_attachments: Optional[bool] = Field(description="Whether to list the attachments for each filing",
+    #                                             default=False)
+    # include_notes: Optional[bool] = Field(description="Whether to list the notes available for each filing",
+    #                                       default=False)
 
     @classmethod
     @field_validator("symbols")
@@ -135,16 +135,12 @@ class ListFilingsAction(BaseAction):
             )
             company_info = {c['id']: c for c in companies_result.data}
 
-        # Load attachments and notes if requested
-        filing_ids = [f['id'] for f in filings_result.data]
-        attachments_by_filing = self._load_attachments(filing_ids) if args.include_attachments else None
-        notes_by_filing = self._load_notes(filing_ids) if args.include_notes else None
-
+        # Attachments and notes disabled - use ReadFiling action instead
         content = self._format_filings_to_md(
             filings=filings_result.data,
             company_info=company_info,
-            attachments_by_filing=attachments_by_filing,
-            notes_by_filing=notes_by_filing
+            attachments_by_filing=None,
+            notes_by_filing=None
         )
 
         # Build result summary

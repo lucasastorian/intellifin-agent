@@ -10,16 +10,16 @@ logger = logging.getLogger(__name__)
 
 class FilingTwentyF(BaseFiling):
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the DEF 14A filing"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
-        pages = self._upsert_filing_pages(filing_id=filing_id)
-        self._upsert_filing_notes(filing_id=filing_id)
+        pages = await self._upsert_filing_pages(filing_id=filing_id)
+        await self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)

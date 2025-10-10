@@ -14,17 +14,22 @@ class FilingSixK(BaseFiling):
         openai_client = OpenAIClient()
         self.filing_summarizer = FilingSummarizer(openai_client)
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the 6-K filing"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         filing = self._upsert_filing(xbrl=xbrl)
-        pages = self._upsert_filing_pages(filing_id=filing['id'])
+        pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
         self._upsert_filing_chunks(pages=pages, filing_id=filing['id'])
 
-        # Run async enrichment in this thread's event loop
-        asyncio.run(self._enrich_filing(filing, pages))
+        # Run async enrichment
+        try:
+            await self._enrich_filing(filing, pages)
+        except Exception as e:
+            print(f"ERROR enriching 6-K {self.accession_number}: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Update filing counts after all processing is complete
         self._update_filing_counts(filing_id=filing['id'])

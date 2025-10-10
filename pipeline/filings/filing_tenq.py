@@ -12,24 +12,29 @@ logger = logging.getLogger(__name__)
 
 class FilingTenQ(BaseFiling):
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the 10-Q filing and associated pages"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
         filing = self.database.table("filings").select("*").eq("id", filing_id).execute().data[0]
-        pages = self._upsert_filing_pages(filing_id=filing_id)
-        self._upsert_filing_notes(filing_id=filing_id)
+        pages = await self._upsert_filing_pages(filing_id=filing_id)
+        await self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
         attachment_data = self._upsert_attachments(filing_id=filing_id)
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
         # Run async enrichment for attachments
         if attachment_data:
-            asyncio.run(self._enrich_attachments(attachment_data, filing))
+            try:
+                await self._enrich_attachments(attachment_data, filing)
+            except Exception as e:
+                print(f"ERROR enriching 10-Q attachments {self.accession_number}: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Update filing counts after all processing is complete
         self._update_filing_counts(filing_id=filing_id)
@@ -145,10 +150,8 @@ class FilingTenQ(BaseFiling):
 
     def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
         """Chunks the filing pages and upserts them"""
-        # Get company data for header
         company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
 
-        # Get fiscal info
         filing_record = self.database.table("filings").select("fiscal_year,fiscal_period").eq("id", filing_id).execute().data[0]
         fiscal_year = filing_record.get('fiscal_year')
         fiscal_period = filing_record.get('fiscal_period')
@@ -156,7 +159,6 @@ class FilingTenQ(BaseFiling):
         extractor = SectionExtractor(pages=pages, filing_type="10-Q")
         sections = extractor.get_sections()
 
-        # Upsert raw section pages
         self._upsert_filing_section_pages(sections, filing_id)
 
         all_chunks = []
@@ -165,26 +167,27 @@ class FilingTenQ(BaseFiling):
             # Part I items: 2 (MD&A), 3 (Market Risk), 4 (Controls)
             # Part II items: 1 (Legal), 1A (Risk Factors), 2 (Unregistered Sales)
             if section['item'] in ['ITEM 1', 'ITEM 1A', 'ITEM 2', 'ITEM 3', 'ITEM 4']:
-                # Map items based on part context
+
                 if section['part'] == 'PART I':
                     section_type = {
                         "ITEM 2": "md&a",
                         "ITEM 3": "market_risk",
                         "ITEM 4": "controls_procedures"
                     }.get(section['item'])
+
                 elif section['part'] == 'PART II':
                     section_type = {
                         "ITEM 1": "legal_proceedings",
                         "ITEM 1A": "risk_factors",
                         "ITEM 2": "unregistered_sales_equity"
                     }.get(section['item'])
+
                 else:
                     section_type = None
 
                 if not section_type:
                     continue
 
-                # Build embedding header
                 header = self._build_embedding_header(company_data, section_type, fiscal_year, fiscal_period)
 
                 # Chunk with header

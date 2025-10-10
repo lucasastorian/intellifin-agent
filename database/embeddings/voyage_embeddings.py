@@ -21,7 +21,6 @@ class VoyageEmbeddings:
         api_key = os.environ.get("VOYAGE_API_KEY")
         assert api_key is not None, "VOYAGE_API_KEY environment variable must be set. Get your API key from https://www.voyageai.com/"
 
-        # Load model-specific limits
         self.limits = VoyageLimits(model)
 
         self.max_tokens_per_request = self.limits.max_tokens_per_request
@@ -33,7 +32,7 @@ class VoyageEmbeddings:
 
         self.client = voyageai.Client(api_key=api_key)
 
-        self.cache = EmbeddingCache(model=model) if cache else None
+        self.cache = EmbeddingCache(model=model, dimensions=dimensions) if cache else None
 
     def query_vector(self, text: str) -> List[float]:
         """Generates a single query vector"""

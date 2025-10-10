@@ -40,6 +40,7 @@ class Filings(Table):
     num_pages = Integer(nullable=True)
     num_attachments = Integer(nullable=True)
     title = Text(nullable=True, fts=True)  # LLM-generated title (for 8-K, 6-K)
+
     summary = Text(nullable=True, fts=True, vector=True)  # LLM-generated summary (context from header baked in)
     synced = Boolean(default=False, nullable=False, index=True)
 
@@ -283,6 +284,7 @@ class CompanyFilingNoteChunks(View):
     id = Field(table="filing_note_chunks", field="id")
     index = Field(table="filing_note_chunks", field="index")
     content = Field(table="filing_note_chunks", field="content")
+    embedding = Field(table="filing_note_chunks", field="embedding")
     has_table = Field(table="filing_note_chunks", field="has_table")
     filing_note_id = Field(table="filing_note_chunks", field="filing_note_id")
 

@@ -15,19 +15,21 @@ class FilingEightK(BaseFiling):
         openai_client = OpenAIClient()
         self.filing_summarizer = FilingSummarizer(openai_client)
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the 8-K filing"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         filing = self._upsert_filing(xbrl=xbrl)
-        pages = self._upsert_filing_pages(filing_id=filing['id'])
+        pages = await self._upsert_filing_pages(filing_id=filing['id'])
         attachment_data = self._upsert_attachments(filing_id=filing['id'])
 
-        async def enrich():
+        try:
             enriched_attachments = await self._enrich_attachments(attachment_data, filing)
             await self._enrich_filing(filing, pages, enriched_attachments)
-
-        asyncio.run(enrich())
+        except Exception as e:
+            print(f"ERROR enriching 8-K {self.accession_number}: {e}")
+            import traceback
+            traceback.print_exc()
 
         self._update_filing_counts(filing_id=filing['id'])
 

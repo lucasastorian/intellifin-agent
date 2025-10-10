@@ -5,6 +5,7 @@ import pandas as pd
 import traceback
 
 from agent.actions.base_action import BaseAction
+from agent.action_response import ActionResponse
 from agent.message import Action, Message
 from utils.financial_statement_merger import FinancialStatementMerger
 
@@ -60,7 +61,9 @@ class ViewFinancialStatementsAction(BaseAction):
         except RuntimeError as e:
             self.log_start("ViewFinancialStatements")
             self.log_error(f"Validation failed: {e}")
-            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            return ActionResponse(
+                message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            )
 
         params = f"{args.symbol} {args.statement_type} ({args.report_type}), {args.start_date} → {args.end_date}"
         self.log_start("ViewFinancialStatements", params, thought=args.thought)
@@ -76,12 +79,14 @@ class ViewFinancialStatementsAction(BaseAction):
                                             start_date=load_start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"Could not find symbol {args.symbol} on EDGAR",
-                error=True,
-                action_id=action.id
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=f"Could not find symbol {args.symbol} on EDGAR",
+                    error=True,
+                    action_id=action.id
+                )
             )
 
         try:
@@ -99,11 +104,13 @@ class ViewFinancialStatementsAction(BaseAction):
 
             if not result.data:
                 self.log_done("No financial statements found")
-                return Message(
-                    role="tool",
-                    status="completed",
-                    content=f"No {args.statement_type.replace('_', ' ')} data found for {args.symbol} in the specified date range.",
-                    action_id=action.id
+                return ActionResponse(
+                    message=Message(
+                        role="tool",
+                        status="completed",
+                        content=f"No {args.statement_type.replace('_', ' ')} data found for {args.symbol} in the specified date range.",
+                        action_id=action.id
+                    )
                 )
 
             merger = FinancialStatementMerger(
@@ -118,11 +125,13 @@ class ViewFinancialStatementsAction(BaseAction):
 
             if merged_df.empty:
                 self.log_done("No data after filtering")
-                return Message(
-                    role="tool",
-                    status="completed",
-                    content="No data available after filtering.",
-                    action_id=action.id
+                return ActionResponse(
+                    message=Message(
+                        role="tool",
+                        status="completed",
+                        content="No data available after filtering.",
+                        action_id=action.id
+                    )
                 )
 
             # Format as markdown table
@@ -131,17 +140,21 @@ class ViewFinancialStatementsAction(BaseAction):
             # Count periods in final output
             period_cols = [col for col in merged_df.columns if col not in ['concept', 'label', 'level', 'axis', 'dimension']]
             self.log_done(f"Merged {len(period_cols)} period(s)")
-            return Message(role="tool", status="completed", content=content, action_id=action.id)
+            return ActionResponse(
+                message=Message(role="tool", status="completed", content=content, action_id=action.id)
+            )
 
         except Exception as e:
             tb = traceback.format_exc()
             self.log_error(f"Failed to load statements: {e}\n{tb}")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"Error loading financial statements: {str(e)}\n\n```\n{tb}\n```",
-                error=True,
-                action_id=action.id
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=f"Error loading financial statements: {str(e)}\n\n```\n{tb}\n```",
+                    error=True,
+                    action_id=action.id
+                )
             )
 
     def _format_as_markdown(self, df: pd.DataFrame, symbol: str, statement_type: str, report_type: str) -> str:

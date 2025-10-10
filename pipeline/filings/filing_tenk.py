@@ -12,24 +12,29 @@ logger = logging.getLogger(__name__)
 
 class FilingTenK(BaseFiling):
 
-    def upsert(self):
+    async def upsert(self):
         """Upserts the 10-K filing and associated pages"""
-        xbrl = self.filing.xbrl()
+        xbrl = await self._load_xbrl()
 
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = self._upsert_filing(xbrl=xbrl)
         filing = self.database.table("filings").select("*").eq("id", filing_id).execute().data[0]
-        pages = self._upsert_filing_pages(filing_id=filing_id)
-        self._upsert_filing_notes(filing_id=filing_id)
+        pages = await self._upsert_filing_pages(filing_id=filing_id)
+        await self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
         attachment_data = self._upsert_attachments(filing_id=filing_id)
         self._upsert_filing_chunks(pages=pages, filing_id=filing_id, filing_type='10-K')
 
         # Run async enrichment for attachments
         if attachment_data:
-            asyncio.run(self._enrich_attachments(attachment_data, filing))
+            try:
+                await self._enrich_attachments(attachment_data, filing)
+            except Exception as e:
+                print(f"ERROR enriching 10-K attachments {self.accession_number}: {e}")
+                import traceback
+                traceback.print_exc()
 
         self._update_filing_counts(filing_id=filing_id)
 

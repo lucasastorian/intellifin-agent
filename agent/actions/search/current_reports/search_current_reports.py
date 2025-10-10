@@ -187,7 +187,7 @@ class SearchCurrentReportsAction(BaseAction):
                 .lte("filing_date", args.end_date)
                 .vector_search(
                     args.query_description,
-                    "summary",  # Vector search on enriched summary field
+                    "summary",
                     topk=limit,
                     return_scores=True
                 )

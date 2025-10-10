@@ -28,15 +28,22 @@ class BaseFiling(ABC):
 
         self.markdown_chunker = MarkdownChunker()
 
-        # Initialize LLM enrichment clients
         openai_client = OpenAIClient()
         self.attachment_summarizer = AttachmentSummarizer(openai_client)
         self.note_preview_generator = NotePreviewGenerator(openai_client)
 
     @abstractmethod
-    def upsert(self):
+    async def upsert(self):
         """Upserts the filing and associated data to local DB"""
         raise NotImplementedError
+
+    async def _load_xbrl(self) -> XBRL:
+        """Async wrapper for blocking edgartools xbrl() call"""
+        return await asyncio.to_thread(self.filing.xbrl)
+
+    async def _load_html(self) -> str:
+        """Async wrapper for blocking edgartools html() call"""
+        return await asyncio.to_thread(self.filing.html)
 
     @staticmethod
     def infer_attachment_type(exhibit_number: str) -> str:
@@ -94,9 +101,9 @@ class BaseFiling(ABC):
         """Upserts the filing to the local db"""
         raise NotImplementedError
 
-    def _upsert_filing_pages(self, filing_id: int):
+    async def _upsert_filing_pages(self, filing_id: int):
         """Creates a record for the filing pages and returns the pages"""
-        html_content = self.filing.html()
+        html_content = await self._load_html()
 
         parser = Parser(content=html_content)
         pages = parser.get_pages()
@@ -110,7 +117,7 @@ class BaseFiling(ABC):
 
         return pages
 
-    def _upsert_filing_notes(self, filing_id: int):
+    async def _upsert_filing_notes(self, filing_id: int):
         """Upserts all the notes associated with the filing and their chunks"""
         if not self.filing.reports:
             return None
@@ -135,7 +142,7 @@ class BaseFiling(ABC):
 
         note_data = [(note_id, processed_note['title'], processed_note['content'])
                      for note_id, processed_note in zip(note_ids, processed_notes)]
-        asyncio.run(self._enrich_note_previews(note_data))
+        await self._enrich_note_previews(note_data)
 
         return note_ids
 
@@ -422,6 +429,9 @@ class BaseFiling(ABC):
         enriched = []
         for att, result in zip(attachment_data, summaries):
             if isinstance(result, Exception):
+                print(f"ERROR enriching attachment {att['exhibit_number']}: {result}")
+                import traceback
+                traceback.print_exception(type(result), result, result.__traceback__)
                 continue
 
             if result and (result.get("title") or result.get("summary")):
@@ -435,9 +445,14 @@ class BaseFiling(ABC):
                     "title": result["title"],
                     "summary": result["summary"]
                 })
+            else:
+                print(f"WARNING: Attachment {att['exhibit_number']} returned empty result: {result}")
 
-        if updates:
-            self.database.table("filing_attachments").upsert(updates, on_conflict="id").execute()
+        for update in updates:
+            self.database.table("filing_attachments").update({
+                "title": update["title"],
+                "summary": update["summary"]
+            }).eq("id", update["id"]).execute()
 
         return enriched
 
@@ -464,5 +479,8 @@ class BaseFiling(ABC):
                     "preview": result
                 })
 
-        if updates:
-            self.database.table("filing_notes").upsert(updates, on_conflict="id").execute()
+        # Update notes (use update() not upsert() since we already have IDs)
+        for update in updates:
+            self.database.table("filing_notes").update({
+                "preview": update["preview"]
+            }).eq("id", update["id"]).execute()

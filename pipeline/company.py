@@ -64,22 +64,30 @@ class Company:
         if start_date or end_date:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
 
-        def upsert_filing_sync(filing: EntityFiling):
-            """Synchronous wrapper for filing upsert - runs in thread"""
+        async def upsert_filing_async(filing: EntityFiling):
+            """Async wrapper for filing upsert"""
             if self._is_filing_synced(filing.accession_number):
                 return None
 
             parser = self._get_filing_parser(filing=filing, company=company)
-            parser.upsert()
+            await parser.upsert()
 
             self._mark_filing_synced(filing.accession_number)
 
             return filing.form
 
-        # Process all filings concurrently in separate threads
+        # Process all filings concurrently
         results = await asyncio.gather(
-            *[asyncio.to_thread(upsert_filing_sync, filing) for filing in filings]
+            *[upsert_filing_async(filing) for filing in filings],
+            return_exceptions=True  # Capture exceptions instead of raising
         )
+
+        # Log any exceptions that occurred
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"ERROR syncing filing {filings[i].accession_number}: {result}")
+                import traceback
+                traceback.print_exception(type(result), result, result.__traceback__)
 
         synced_count = sum(1 for result in results if result is not None and not isinstance(result, Exception))
 

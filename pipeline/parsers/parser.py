@@ -16,6 +16,8 @@ ITALIC_TAGS = {"i", "em"}
 
 _ws = re.compile(r"\s+")
 _css_decl = re.compile(r"^[a-zA-Z\-]+\s*:\s*[^;]+;\s*$")
+ITEM_HEADER_CELL_RE = re.compile(r"^\s*Item\s+([0-9IVX]+)\.\s*$", re.I)
+PART_HEADER_CELL_RE = re.compile(r"^\s*Part\s+([IVX]+)\s*$", re.I)
 
 logger = logging.getLogger(__name__)
 
@@ -149,14 +151,12 @@ class Parser:
             return self._process_text_node(element)
 
         if element.name == "table":
-            rows = element.find_all("tr", recursive=True)
-            if len(rows) <= 1:
-                cells = element.find_all(["td", "th"], recursive=True)
-                text = "\n\n".join(
-                    self._clean_text(c.get_text(" ", strip=True))
-                    for c in cells
-                    if self._clean_text(c.get_text(" ", strip=True))
-                ).strip()
+            # Use effective (non-empty) rows for the decision
+            eff_rows = self._effective_rows(element)
+            if len(eff_rows) <= 1:
+                # Flatten single-row "header tables" like Item/Part banners
+                cells = eff_rows[0] if eff_rows else []
+                text = self._one_row_table_to_text(cells)
                 return text
 
             self.includes_table = True
