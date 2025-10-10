@@ -20,7 +20,7 @@ class InsertBuilder:
         if self.table in schema.views:
             raise ValueError(f"Cannot INSERT into view '{table}'.")
 
-    def execute(self):
+    async def execute(self):
         """Execute the INSERT query."""
         validated_rows = [self.db._validate_insert_data(self.table, row) for row in self.rows]
         with_defaults = [self.db._apply_runtime_defaults(self.table, row) for row in validated_rows]
@@ -56,11 +56,11 @@ class InsertBuilder:
                         all_results.append(row)
 
         # Embed and store vectors AFTER SQLite insert, BEFORE return
-        self._embed_vectors(all_results)
+        await self._embed_vectors(all_results)
 
         return Result(all_results)
 
-    def _embed_vectors(self, rows: List[Dict[str, Any]]):
+    async def _embed_vectors(self, rows: List[Dict[str, Any]]):
         """Embed and store vectors for vector-enabled fields"""
         if not rows or not self.db.embedder:
             return
@@ -92,8 +92,8 @@ class InsertBuilder:
             if not texts:
                 continue
 
-            # Batch embed
-            embeddings = self.db.embedder.embed(texts)
+            # Batch embed (async)
+            embeddings = await self.db.embedder.embed(texts)
             vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
             # Store in vector store

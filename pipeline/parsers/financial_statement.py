@@ -15,13 +15,13 @@ class FinancialStatements:
 
         self.statements = xbrl.statements
 
-    def upsert_statements(self):
+    async def upsert_statements(self):
         """Upserts the statement to SQLite"""
         income_data = self._format_statement(statement=self.statements.income_statement())
         balance_sheet_data = self._format_statement(statement=self.statements.balance_sheet())
         cash_flow_data = self._format_statement(statement=self.statements.cashflow_statement())
 
-        self.database.table("financial_statements").upsert(
+        await self.database.table("financial_statements").upsert(
             [
                 {
                     "type": "income_statement",

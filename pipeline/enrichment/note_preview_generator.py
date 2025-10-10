@@ -1,6 +1,6 @@
 from typing import Dict
 from pydantic import BaseModel, Field
-from pipeline.enrichment.openai_client import OpenAIClient
+from pipeline.enrichment.base_client import BaseLLMClient
 
 
 class NotePreview(BaseModel):
@@ -23,8 +23,8 @@ Guidelines:
 - Be specific about what's disclosed (e.g., "Disaggregates revenue by product, geography, and customer type")
 - Skip generic phrases like "This note discusses..." - just state what it covers"""
 
-    def __init__(self, openai_client: OpenAIClient):
-        self.client = openai_client
+    def __init__(self, client: BaseLLMClient):
+        self.client = client
 
     async def generate(self, note_title: str, note_content: str) -> str:
         """

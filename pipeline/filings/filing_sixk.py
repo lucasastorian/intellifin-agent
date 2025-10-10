@@ -9,19 +9,18 @@ from pipeline.enrichment.filing_summarizer import FilingSummarizer
 
 class FilingSixK(BaseFiling):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        openai_client = OpenAIClient()
-        self.filing_summarizer = FilingSummarizer(openai_client)
+    def __init__(self, *args, openai_client=None, **kwargs):
+        super().__init__(*args, openai_client=openai_client, **kwargs)
+        # Use same client as parent
+        client = openai_client if openai_client else OpenAIClient()
+        self.filing_summarizer = FilingSummarizer(client)
 
     async def upsert(self):
         """Upserts the 6-K filing"""
         xbrl = await self._load_xbrl()
 
-        filing = self._upsert_filing(xbrl=xbrl)
+        filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
-
-        self._upsert_filing_chunks(pages=pages, filing_id=filing['id'])
 
         # Run async enrichment
         try:
@@ -32,11 +31,11 @@ class FilingSixK(BaseFiling):
             traceback.print_exc()
 
         # Update filing counts after all processing is complete
-        self._update_filing_counts(filing_id=filing['id'])
+        await self._update_filing_counts(filing_id=filing['id'])
 
-    def _upsert_filing(self, xbrl: XBRL) -> dict:
+    async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""
-        response = self.database.table("filings").upsert({
+        response = await self.database.table("filings").upsert({
             "form": self.filing.form,
             "amendment": self.filing.form == "6-K/A",
             "filing_date": self.filing_date,
@@ -64,9 +63,7 @@ class FilingSixK(BaseFiling):
 
         # Update filing with title + summary
         if result and (result.get("title") or result.get("summary")):
-            await asyncio.to_thread(
-                lambda: self.database.table("filings").update({
-                    "title": result["title"],
-                    "summary": result["summary"]
-                }).eq("id", filing['id']).execute()
-            )
+            await self.database.table("filings").update({
+                "title": result["title"],
+                "summary": result["summary"]
+            }).eq("id", filing['id']).execute()

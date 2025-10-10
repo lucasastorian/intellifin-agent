@@ -14,17 +14,17 @@ class BaseDocument(ABC):
         """Generate a string preview of the document"""
         raise NotImplementedError
 
-    def _load_filing(self) -> dict:
+    async def _load_filing(self) -> dict:
         """Loads the filing from the database"""
-        return self.database.table("company_filings").select("*").eq("filing_id", self.filing_id).single().execute()
+        return await self.database.table("company_filings").select("*").eq("filing_id", self.filing_id).single().execute()
 
-    def _load_attachments(self) -> dict:
+    async def _load_attachments(self) -> dict:
         """Loads the filing from the database"""
-        return self.database.table("filing_attachments").select("*").eq("filing_id", self.filing_id).single().execute()
+        return await self.database.table("filing_attachments").select("*").eq("filing_id", self.filing_id).single().execute()
 
-    def _load_notes(self) -> dict:
+    async def _load_notes(self) -> dict:
         """Loads the filing from the database"""
-        return self.database.table("filing_notes").select("*").eq("filing_id", self.filing_id).single().execute()
+        return await self.database.table("filing_notes").select("*").eq("filing_id", self.filing_id).single().execute()
 
     # @staticmethod
     # def build_header(company_data: dict, filing_data: dict) -> str:

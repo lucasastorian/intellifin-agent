@@ -3,6 +3,7 @@ from agent.actions.list_companies import ListCompaniesAction
 from agent.actions.list_filings import ListFilingsAction
 from agent.actions.view_financial_statements import ViewFinancialStatementsAction
 from agent.actions.python_exec import PythonExecAction
+from agent.actions.plan import PlanAction
 from agent.actions.search.filing_excerpts.search_filing_excerpts import SearchFilingSectionsAction
 from agent.actions.search.press_releases.search_press_releases import SearchPressReleasesAction
 from agent.actions.search.current_reports.search_current_reports import SearchCurrentReportsAction
@@ -16,6 +17,7 @@ __all__ = [
     "ListFilingsAction",
     "ViewFinancialStatementsAction",
     "PythonExecAction",
+    "PlanAction",
     "SearchFilingSectionsAction",
     "SearchPressReleasesAction",
     "SearchCurrentReportsAction",

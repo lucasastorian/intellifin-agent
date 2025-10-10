@@ -109,7 +109,7 @@ class UpsertBuilder:
 
         return validated_data
 
-    def execute(self):
+    async def execute(self):
         """Execute the UPSERT query."""
         # For upsert, we need special validation that allows on_conflict fields (even if they're primary keys)
         validated_rows = [self._validate_upsert_row(row) for row in self.rows]
@@ -241,11 +241,11 @@ class UpsertBuilder:
                         all_results.append(row)
 
         # Embed and store vectors AFTER SQLite upsert, BEFORE return
-        self._embed_vectors(all_results)
+        await self._embed_vectors(all_results)
 
         return Result(all_results)
 
-    def _embed_vectors(self, rows: List[Dict[str, Any]]):
+    async def _embed_vectors(self, rows: List[Dict[str, Any]]):
         """Embed and store vectors for vector-enabled fields"""
         if not rows or not self.db.embedder:
             return
@@ -281,8 +281,8 @@ class UpsertBuilder:
             if not texts:
                 continue
 
-            # Batch embed
-            embeddings = self.db.embedder.embed(texts)
+            # Batch embed (async)
+            embeddings = await self.db.embedder.embed(texts)
             vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
             # Store in vector store

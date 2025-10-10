@@ -9,15 +9,15 @@ class FilingDefFourteenA(BaseFiling):
         """Upserts the DEF 14A filing"""
         xbrl = await self._load_xbrl()
 
-        filing_id = self._upsert_filing(xbrl=xbrl)
+        filing_id = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing_id)
 
         # DEF 14A filings are not chunked
-        self._update_filing_counts(filing_id=filing_id)
+        await self._update_filing_counts(filing_id=filing_id)
 
-    def _upsert_filing(self, xbrl: XBRL) -> int:
+    async def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""
-        response = self.database.table("filings").upsert({
+        response = await self.database.table("filings").upsert({
             "form": self.filing.form,
             "amendment": self.filing.form == "DEF 14A/A",
             "filing_date": self.filing_date,

@@ -65,7 +65,7 @@ Available note IDs are from your curated search results."""
         self.log_start("ReadFullFilingNote", f"Note #{args.filing_note_id}", thought=args.thought)
 
         # Get full note using company_filing_notes view
-        result = (
+        result = await (
             self.database
             .table("company_filing_notes")
             .select("*")

@@ -1,41 +1,32 @@
 import asyncio
-import httpx
+import json
 import logging
-from typing import Type
-from openai import AsyncOpenAI
-
+from typing import Type, TypeVar
+from groq import AsyncGroq
+from pydantic import BaseModel
 from .llm_cache import LLMCache
 from .base_client import BaseLLMClient, T
 
 
-class OpenAIClient(BaseLLMClient):
-    """Generic OpenAI client for structured output generation"""
+class GroqClient(BaseLLMClient):
+    """Groq client for structured output generation"""
 
-    def __init__(self, model: str = "gpt-5-nano", max_concurrent: int = 100, cache: bool = True):
+    def __init__(self, model: str = "openai/gpt-oss-20b", max_concurrent: int = 100, cache: bool = True, timeout: float = 10.0):
         self.model = model
-
-        limits = httpx.Limits(
-            max_connections=200,
-            max_keepalive_connections=50,
-            keepalive_expiry=60.0,
-        )
-        timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=60.0)
-        httpx_client = httpx.AsyncClient(limits=limits, timeout=timeout)
-        self.client = AsyncOpenAI(http_client=httpx_client)
-
+        self.client = AsyncGroq(timeout=timeout)
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.cache = LLMCache() if cache else None
 
     async def parse(self, system_prompt: str, user_message: str, response_model: Type[T],
                     reasoning_effort: str = "none") -> T:
         """
-        Generate structured output using OpenAI's structured outputs API
+        Generate structured output using Groq's structured outputs API
 
         Args:
             system_prompt: System instruction for the LLM
             user_message: User input (typically includes context + content to summarize)
             response_model: Pydantic model class for structured output
-            reasoning_effort: Reasoning effort level ("none", "low", "medium", "high")
+            reasoning_effort: Reasoning effort level (ignored for Groq, kept for API compatibility)
 
         Returns:
             Parsed response matching response_model type
@@ -54,21 +45,28 @@ class OpenAIClient(BaseLLMClient):
                 return cached
 
         async with self.semaphore:
-            params = {
-                "model": self.model,
-                "input": [
+            start_time = asyncio.get_event_loop().time()
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                "text_format": response_model
-            }
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_model.__name__.lower(),
+                        "schema": response_model.model_json_schema()
+                    }
+                }
+            )
 
-            if reasoning_effort and reasoning_effort != "none":
-                params["reasoning"] = {"effort": reasoning_effort}
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > 5:
+                logging.warning(f"Slow Groq call: {elapsed:.1f}s for {self.model}")
 
-            response = await self.client.responses.parse(**params)
-
-            result = response.output_parsed
+            result = response_model.model_validate(json.loads(response.choices[0].message.content))
 
             if self.cache:
                 self.cache.set(

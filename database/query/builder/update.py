@@ -23,7 +23,7 @@ class UpdateBuilder(PredMixin):
         if self.table in schema.views:
             raise ValueError(f"Cannot UPDATE view '{table}'.")
 
-    def execute(self):
+    async def execute(self):
         """Execute the UPDATE query."""
         data_with_auto = self.db._apply_auto_update(self.table, self.data)
         validated_data = self.db._validate_update_data(self.table, data_with_auto)
@@ -43,11 +43,11 @@ class UpdateBuilder(PredMixin):
             processed.append(row)
 
         # Update vectors for changed fields AFTER commit, BEFORE return
-        self._update_vectors(processed)
+        await self._update_vectors(processed)
 
         return Result(processed)
 
-    def _update_vectors(self, rows: List[Dict[str, Any]]):
+    async def _update_vectors(self, rows: List[Dict[str, Any]]):
         """Update vectors for any vector-enabled fields that were modified"""
         if not rows or not self.db.embedder:
             return
@@ -87,8 +87,8 @@ class UpdateBuilder(PredMixin):
             if existing_ids:
                 vector_store.tombstone_batch(existing_ids)
 
-            # Batch embed new content
-            embeddings = self.db.embedder.embed(texts)
+            # Batch embed new content (async)
+            embeddings = await self.db.embedder.embed(texts)
             vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
             # Append new vectors

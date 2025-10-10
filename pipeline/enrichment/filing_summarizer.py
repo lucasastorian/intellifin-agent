@@ -1,5 +1,5 @@
 from typing import Dict, List
-from pipeline.enrichment.openai_client import OpenAIClient
+from pipeline.enrichment.base_client import BaseLLMClient
 from pipeline.enrichment.models import FilingSummary
 
 
@@ -20,8 +20,8 @@ Guidelines:
 - Be specific with numbers, dates, and entity names
 - Focus on what investors care about most"""
 
-    def __init__(self, openai_client: OpenAIClient):
-        self.client = openai_client
+    def __init__(self, client: BaseLLMClient):
+        self.client = client
 
     async def summarize(self, pages: List[Dict], attachment_summaries: List[Dict], header: str) -> Dict[str, str]:
         """

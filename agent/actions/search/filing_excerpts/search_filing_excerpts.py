@@ -192,7 +192,7 @@ class SearchFilingSectionsAction(BaseAction):
             depth_map = {'low': 5, 'medium': 15, 'high': 30}
             limit = depth_map[args.depth]
 
-            result = query.vector_search(
+            result = await query.vector_search(
                 args.excerpt_description,
                 "embedding",
                 topk=limit,

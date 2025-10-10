@@ -1,6 +1,8 @@
 """Safe Python expression evaluator for calculations"""
 import ast
+import io
 import math
+import sys
 import traceback
 from pydantic import BaseModel, Field, ValidationError
 
@@ -10,43 +12,31 @@ from agent.action_response import ActionResponse
 
 
 class PythonExec(BaseModel):
-    """Execute Python code for mathematical calculations (stateless, single-execution)
+    """Execute Python code for calculations. State persists across calls - variables remain available.
 
-    Use this tool to perform calculations using full Python syntax:
-    - Basic math: `100 * 1.08`, `1000 / 12`, `2 ** 10`
-    - Variables: `revenue = 1000\nmargin = 0.25\nrevenue * margin`
-    - Functions: `round(3.14159, 2)`, `abs(-5)`, `max(10, 20, 30)`
-    - Math library: `math.sqrt(16)`, `math.log(100)`, `math.exp(2)`
-    - Comments: `# This is a comment\nresult = 100 * 1.08\nresult`
-    - Loops/conditions: Full Python control flow is supported
-    - Multi-step: Use newlines. Last expression is returned as result.
+    Supports: math operations, control flow (loops/conditions), comments, print statements, builtins (round, sum, max, etc.), math module
 
-    Examples:
-    ```python
-    # Calculate member-months by region
-    ucan = {'Q1': {'rev': 4224, 'arm': 17.30}, 'Q2': {'rev': 4296, 'arm': 17.17}}
-    total_mm = 0
-    for q, data in ucan.items():
-        total_mm += data['rev'] / data['arm']
-    total_mm  # This expression will be returned
-    ```
+    IMPORTANT: End with an expression (not assignment) to return a value.
+    - Returns value: `total` or `revenue * margin`
+    - No return: `x = 100` or `total = sum(values)`
+    - Can also use print() for intermediate outputs
 
-    IMPORTANT Limitations:
-    - No session state: Each call is isolated. Variables from previous PythonExec calls are NOT available.
-    - No imports: Only builtins (int, float, list, dict, etc.) and `math` module are available.
-    - No file I/O: Cannot read/write files, make network requests, or access external resources.
-    - Calculations only: Designed for financial math, not data analysis or complex workflows.
-
-    For complex multi-step workflows, break calculations into smaller independent calls.
+    Set reset=True to clear all variables and start fresh.
     """
 
     thought: str = Field(
-        description="Explain what calculation you're performing and what values you're using"
+        description="Brief explanation of what this calculation does and what you're computing"
     )
 
     code: str = Field(
-        description="Self-contained Python code. Must include all variable definitions needed. "
-                    "Last expression is returned as the result."
+        description="Python code to execute. IMPORTANT: Variables from previous PythonExec calls "
+                    "persist and are available. End with an expression (not assignment) to return a value."
+    )
+
+    reset: bool = Field(
+        default=False,
+        description="Set to True to clear all session variables and start fresh. "
+                    "Use when beginning a completely new, unrelated calculation."
     )
 
 
@@ -79,9 +69,15 @@ class PythonExecAction(BaseAction):
         'reversed': reversed,
         'any': any,
         'all': all,
+        'print': print,
         # Math module
         'math': math,
     }
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Persistent namespace - survives across calls in the same session
+        self.namespace = {'__builtins__': self.SAFE_BUILTINS}
 
     async def call(self, action: Action):
         """Execute Python code safely"""
@@ -94,43 +90,67 @@ class PythonExecAction(BaseAction):
                 message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
             )
 
+        # Handle reset request
+        if args.reset:
+            self.namespace = {'__builtins__': self.SAFE_BUILTINS}
+
+        # Count user-defined variables (exclude builtins)
+        var_count = len([k for k in self.namespace.keys() if k != '__builtins__'])
+
         # Show code in logs (truncate if very long)
         code_preview = args.code if len(args.code) <= 100 else args.code[:97] + "..."
-        self.log_start("PythonExec", f"Code: {code_preview}", thought=args.thought)
+        self.log_start("PythonExec", f"Code: {code_preview} | Vars: {var_count}", thought=args.thought)
 
         try:
-            # Create restricted namespace
-            namespace = {'__builtins__': self.SAFE_BUILTINS}
+            # Capture stdout and stderr
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
 
-            # Parse code into AST to properly handle multi-line code and comments
             try:
-                parsed = ast.parse(args.code, mode='exec')
-            except SyntaxError as e:
-                raise SyntaxError(f"Invalid Python syntax: {e}")
+                # Redirect output
+                sys.stdout = stdout_capture
+                sys.stderr = stderr_capture
 
-            # Check if the last statement is an expression we can capture
-            result = None
-            if parsed.body:
-                last_node = parsed.body[-1]
+                # Parse code into AST to properly handle multi-line code and comments
+                try:
+                    parsed = ast.parse(args.code, mode='exec')
+                except SyntaxError as e:
+                    raise SyntaxError(f"Invalid Python syntax: {e}")
 
-                # If last statement is an expression, capture its value
-                if isinstance(last_node, ast.Expr):
-                    # Execute everything except the last expression
-                    if len(parsed.body) > 1:
-                        statements = ast.Module(body=parsed.body[:-1], type_ignores=[])
-                        exec(compile(statements, '<string>', 'exec'), namespace)
-
-                    # Evaluate the last expression
-                    expr = ast.Expression(body=last_node.value)
-                    result = eval(compile(expr, '<string>', 'eval'), namespace)
-                else:
-                    # Last statement is not an expression (e.g., assignment, loop, etc.)
-                    # Just execute everything
-                    exec(compile(parsed, '<string>', 'exec'), namespace)
-                    result = None
-            else:
-                # Empty code
+                # Check if the last statement is an expression we can capture
                 result = None
+                if parsed.body:
+                    last_node = parsed.body[-1]
+
+                    # If last statement is an expression, capture its value
+                    if isinstance(last_node, ast.Expr):
+                        # Execute everything except the last expression
+                        if len(parsed.body) > 1:
+                            statements = ast.Module(body=parsed.body[:-1], type_ignores=[])
+                            exec(compile(statements, '<string>', 'exec'), self.namespace)
+
+                        # Evaluate the last expression
+                        expr = ast.Expression(body=last_node.value)
+                        result = eval(compile(expr, '<string>', 'eval'), self.namespace)
+                    else:
+                        # Last statement is not an expression (e.g., assignment, loop, etc.)
+                        # Just execute everything
+                        exec(compile(parsed, '<string>', 'exec'), self.namespace)
+                        result = None
+                else:
+                    # Empty code
+                    result = None
+
+            finally:
+                # Always restore original stdout/stderr
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
+            # Get captured output
+            stdout_output = stdout_capture.getvalue()
+            stderr_output = stderr_capture.getvalue()
 
             # Format result
             if isinstance(result, float):
@@ -138,12 +158,34 @@ class PythonExecAction(BaseAction):
                 if abs(result) > 1e-10:
                     result = round(result, 10)
 
-            if result is not None:
-                content = f"**Code**:\n```python\n{args.code}\n```\n\n**Result**: `{result}`"
-            else:
-                content = f"**Code**:\n```python\n{args.code}\n```\n\n**Executed** (no return value)"
+            # Count variables after execution
+            new_var_count = len([k for k in self.namespace.keys() if k != '__builtins__'])
 
-            self.log_done(f"Result: {result}")
+            # Build response content
+            content_parts = [f"```python\n{args.code}\n```"]
+
+            # Add stdout if present
+            if stdout_output.strip():
+                content_parts.append(f"\n**Output**:\n```\n{stdout_output.rstrip()}\n```")
+
+            # Add stderr if present
+            if stderr_output.strip():
+                content_parts.append(f"\n**Warnings**:\n```\n{stderr_output.rstrip()}\n```")
+
+            # Add result
+            if result is not None:
+                content_parts.append(f"\n**Result**: `{result}`")
+            elif not stdout_output.strip():
+                # Only show "no return value" if there's also no stdout
+                content_parts.append("\n**Executed** (no return value)")
+
+            content = "".join(content_parts)
+
+            # Add state info if variables exist
+            if new_var_count > 0:
+                content += f"\n\n_Session has {new_var_count} variable(s)_"
+
+            self.log_done(f"Result: {result} | Vars: {new_var_count}")
             return ActionResponse(
                 message=Message(role="tool", status="completed", content=content, action_id=action.id)
             )

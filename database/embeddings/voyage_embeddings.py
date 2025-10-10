@@ -30,22 +30,23 @@ class VoyageEmbeddings:
         self.token_rate_limiter = TokenRateLimiter(max_tokens=self.max_tokens_per_minute, period=60)
         self.request_rate_limiter = RequestRateLimiter(max_requests=self.max_requests_per_minute, period=60)
 
-        self.client = voyageai.Client(api_key=api_key)
+        self.client = voyageai.AsyncClient(api_key=api_key)
 
         self.cache = EmbeddingCache(model=model, dimensions=dimensions) if cache else None
 
-    def query_vector(self, text: str) -> List[float]:
+    async def query_vector(self, text: str) -> List[float]:
         """Generates a single query vector"""
-        return self._embed(texts=[text], input_type="query")[0]
+        result = await self._embed(texts=[text], input_type="query")
+        return result[0]
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generates a flat list of embeddings for all texts."""
         if not self.cache:
-            return [
-                embedding
-                for batch in self._batch_texts(texts=texts)
-                for embedding in self._embed(batch, input_type="document")
-            ]
+            all_embeddings = []
+            for batch in await self._batch_texts(texts=texts):
+                batch_embeddings = await self._embed(batch, input_type="document")
+                all_embeddings.extend(batch_embeddings)
+            return all_embeddings
 
         cached = self.cache.get_many(texts)
 
@@ -58,11 +59,10 @@ class VoyageEmbeddings:
 
         if uncached_texts:
             logging.debug(f"Cache miss: {len(uncached_texts)}/{len(texts)} texts")
-            new_embeddings = [
-                embedding
-                for batch in self._batch_texts(texts=uncached_texts)
-                for embedding in self._embed(batch, input_type="document")
-            ]
+            new_embeddings = []
+            for batch in await self._batch_texts(texts=uncached_texts):
+                batch_embeddings = await self._embed(batch, input_type="document")
+                new_embeddings.extend(batch_embeddings)
             # Cache new embeddings
             self.cache.set_many(uncached_texts, new_embeddings)
         else:
@@ -91,7 +91,7 @@ class VoyageEmbeddings:
                 TimeoutError
         ))
     )
-    def _embed(self, texts: List[str], input_type: Literal['document', 'query']) -> List[List[float]]:
+    async def _embed(self, texts: List[str], input_type: Literal['document', 'query']) -> List[List[float]]:
         """Embeds a batch of texts with the Voyage API"""
         estimated_tokens = self.client.count_tokens(texts, model=self.model)
 
@@ -100,7 +100,7 @@ class VoyageEmbeddings:
         try:
             with self.request_rate_limiter.context():
                 with self.token_rate_limiter.context(estimated_tokens) as update_func:
-                    response = self.client.embed(
+                    response = await self.client.embed(
                         texts=texts,
                         model=self.model,
                         input_type=input_type,
@@ -120,7 +120,7 @@ class VoyageEmbeddings:
                 logging.warning(f"Local rate limit hit: {e}")
             raise
 
-    def _batch_texts(self, texts: List[str]) -> List[List[str]]:
+    async def _batch_texts(self, texts: List[str]) -> List[List[str]]:
         """Split a list of texts into batches respecting Voyage API limits."""
         batches = []
         current_batch = []

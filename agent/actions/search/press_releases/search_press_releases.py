@@ -171,12 +171,14 @@ class SearchPressReleasesAction(BaseAction):
             depth_map = {'low': 5, 'medium': 15, 'high': 30}
             limit = depth_map[args.depth]
 
-            result = query.vector_search(
-                args.excerpt_description,
-                "embedding",  # Vector search on embedding field (has header context)
+            result = await query.vector_search(
+                query=args.excerpt_description,
+                column="embedding",
                 topk=limit,
                 return_scores=True
             ).execute()
+
+            print(f"Vector search returned {limit} results")
 
             for r in result.data:
                 r['_type'] = 'press_release_chunk'
@@ -230,7 +232,6 @@ class SearchPressReleasesAction(BaseAction):
         form = r['form']
         exhibit_number = r['exhibit_number']
 
-        # Format date naturally
         filing_date = datetime.strptime(r['filing_date'], '%Y-%m-%d').strftime('%B %-d, %Y')
 
         pages = r['pages']
@@ -246,10 +247,8 @@ class SearchPressReleasesAction(BaseAction):
                 content_parts.append(page_data['content'].strip())
         content = "\n\n".join(content_parts)
 
-        # Score is injected by vector search
         score = r.get('_score', 0.0)
 
-        # Optional description
         description = r.get('attachment_description')
         desc_display = f" - {description}" if description else ""
 

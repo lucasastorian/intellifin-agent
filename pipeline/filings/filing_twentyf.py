@@ -17,22 +17,22 @@ class FilingTwentyF(BaseFiling):
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
-        filing_id = self._upsert_filing(xbrl=xbrl)
+        filing_id = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing_id)
         await self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
 
-        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
+        await self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
 
         # Update filing counts after all processing is complete
-        self._update_filing_counts(filing_id=filing_id)
+        await self._update_filing_counts(filing_id=filing_id)
 
-    def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
+    async def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""
         fiscal_year = xbrl.entity_info['fiscal_year'] if xbrl else None
         fiscal_period = xbrl.entity_info['fiscal_period'] if xbrl else None
 
-        response = self.database.table("filings").upsert({
+        response = await self.database.table("filings").upsert({
             "form": self.filing.form,
             "amendment": self.filing.form == "20-F/A",
             "fiscal_year": fiscal_year,
@@ -84,7 +84,7 @@ class FilingTwentyF(BaseFiling):
 
         return "\n".join(parts)
 
-    def _upsert_filing_section_pages(self, sections: List[dict], filing_id: int):
+    async def _upsert_filing_section_pages(self, sections: List[dict], filing_id: int):
         """Upserts raw section pages before chunking"""
         all_pages = []
 
@@ -117,18 +117,18 @@ class FilingTwentyF(BaseFiling):
                 })
 
         if all_pages:
-            self.database.table("filing_section_pages").upsert(
+            await self.database.table("filing_section_pages").upsert(
                 all_pages,
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
+    async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
         """Chunks the filing pages and upserts them"""
         # Get company data for header
-        company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
+        company_data = (await self.database.table("companies").select("*").eq("id", self.company_id).execute()).data[0]
 
         # Get fiscal info
-        filing_record = self.database.table("filings").select("fiscal_year,fiscal_period").eq("id", filing_id).execute().data[0]
+        filing_record = (await self.database.table("filings").select("fiscal_year,fiscal_period").eq("id", filing_id).execute()).data[0]
         fiscal_year = filing_record.get('fiscal_year')
         fiscal_period = filing_record.get('fiscal_period')
 
@@ -177,5 +177,5 @@ class FilingTwentyF(BaseFiling):
                 })
 
         if all_chunks:
-            self.database.table("filing_section_chunks").upsert(all_chunks,
+            await self.database.table("filing_section_chunks").upsert(all_chunks,
                                                                 on_conflict="filing_id,section,index").execute()

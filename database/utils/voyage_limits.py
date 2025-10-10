@@ -44,16 +44,9 @@ class VoyageLimits:
         else:
             base_limits = self.MODEL_LIMITS[self.model]
 
-        # Load base limits
         self.max_tokens_per_request = base_limits["max_tokens_per_request"]
         self.max_tokens_per_minute = base_limits["max_tokens_per_minute"]
         self.max_requests_per_minute = base_limits["max_requests_per_minute"]
-
-        # Allow override via environment variables for higher tiers
-        self.max_tokens_per_request = int(os.environ.get("VOYAGE_MAX_TOKENS_PER_REQUEST", self.max_tokens_per_request))
-        self.max_tokens_per_minute = int(os.environ.get("VOYAGE_MAX_TOKENS_PER_MINUTE", self.max_tokens_per_minute))
-        self.max_requests_per_minute = int(
-            os.environ.get("VOYAGE_MAX_REQUESTS_PER_MINUTE", self.max_requests_per_minute))
 
     def get_limits(self) -> Dict[str, int]:
         """Get all limits as a dictionary"""

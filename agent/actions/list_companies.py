@@ -45,7 +45,7 @@ class ListCompaniesAction(BaseAction):
         params = f"'{args.query}'"
         self.log_start("ListCompanies", params, thought=args.thought)
 
-        result = (
+        result = await (
             self.database
             .table("companies")
             .select("id,name,symbols,exchanges,industry,sector,market_cap,delisted")

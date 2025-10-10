@@ -1,5 +1,5 @@
 from typing import Dict, List
-from pipeline.enrichment.openai_client import OpenAIClient
+from pipeline.enrichment.base_client import BaseLLMClient
 from pipeline.enrichment.models import AttachmentSummary
 
 
@@ -19,15 +19,15 @@ Guidelines:
 - Be specific with numbers, dates, and entity names
 - Focus on material information that investors care about"""
 
-    def __init__(self, openai_client: OpenAIClient):
-        self.client = openai_client
+    def __init__(self, client: BaseLLMClient):
+        self.client = client
 
     async def summarize(self, pages: List[Dict], header: str) -> Dict[str, str]:
         """
         Generate title and summary for an attachment
 
         Args:
-            pages: List of page dicts with 'page' and 'content' keys (first 10 pages)
+            pages: List of page dicts with 'page' and 'content' keys (first 5 pages)
             header: Context header (company, filing, etc.)
 
         Returns:

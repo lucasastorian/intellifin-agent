@@ -162,7 +162,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
 
     async def _read_primary_document(self, start_page: int, end_page: int) -> Optional[Tuple[str, List[Dict]]]:
         """Read pages from primary filing document - returns (content, pages_read)"""
-        result = (
+        result = await (
             self.database
             .table("company_filing_pages")
             .select("page,content,form,company_name,company_symbols,filing_date,accession_number")
@@ -199,7 +199,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
     async def _read_attachment(self, attachment_id: int, start_page: int, end_page: int) -> Optional[Tuple[str, List[Dict]]]:
         """Read pages from filing attachment - returns (content, pages_read)"""
         # Get attachment metadata
-        att_result = (
+        att_result = await (
             self.database
             .table("company_filing_attachments")
             .select("exhibit_number,title,attachment_type,company_name,company_symbols,form,filing_date")
@@ -214,7 +214,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
         att = att_result.data[0]
 
         # Get pages
-        pages_result = (
+        pages_result = await (
             self.database
             .table("filing_attachment_pages")
             .select("page,content")
@@ -250,7 +250,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
 
     async def _read_note(self, note_id: int) -> Optional[Tuple[str, List[Dict]]]:
         """Read full financial statement note content - returns (content, empty list)"""
-        result = (
+        result = await (
             self.database
             .table("company_filing_notes")
             .select("title,content,filename,company_name,company_symbols,form,filing_date,fiscal_year,fiscal_period")

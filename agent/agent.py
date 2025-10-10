@@ -9,7 +9,7 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
-                           ViewFinancialStatementsAction, PythonExecAction, SearchFilingSectionsAction, ReadFilingAction, )
+                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction, ReadFilingAction, )
 
 
 class Agent:
@@ -21,17 +21,28 @@ class Agent:
         self.num_iter = 0
         self.max_iter = max_iter
         self.messages = []
+        self._initialized = False
 
         self.database = Database(schema=schema, base_path="./data/.local.db")
 
+    async def _initialize(self):
+        """Async initialization - provisions companies database if needed"""
+        if self._initialized:
+            return
+
         provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
-        provisioner.provision()
+        await provisioner.provision()
+        self._initialized = True
 
     async def run(self, query: str) -> Optional[str]:
         """Orchestrates agent iterations (horizontal limit via max_iter)"""
+        await self._initialize()
+
         self.messages.append(Message(role="user", status="completed", content=query))
 
         base_actions = [
+            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+
             ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),

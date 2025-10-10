@@ -109,7 +109,7 @@ class ListFilingsAction(BaseAction):
             .lte("report_date", args.end_date or date.today().isoformat())
         )
 
-        filings_result = qb.order("report_date", desc=True).limit(50).execute()
+        filings_result = await qb.order("report_date", desc=True).limit(50).execute()
 
         if not filings_result.data:
             self.log_done("No filings found")
@@ -126,7 +126,7 @@ class ListFilingsAction(BaseAction):
         company_ids = {f['company_id'] for f in filings_result.data if f.get('company_id')}
         company_info = {}
         if company_ids:
-            companies_result = (
+            companies_result = await (
                 self.database
                 .table("companies")
                 .select("id,name,symbols,sector,industry,fiscal_year_end,delisted")
@@ -166,7 +166,7 @@ class ListFilingsAction(BaseAction):
         if not filing_ids:
             return {}
 
-        result = (
+        result = await (
             self.database
             .table("filing_attachments")
             .select("id,filing_id,exhibit_number,title,type,num_pages")
@@ -190,7 +190,7 @@ class ListFilingsAction(BaseAction):
         if not filing_ids:
             return {}
 
-        result = (
+        result = await (
             self.database
             .table("filing_notes")
             .select("id,filing_id,title,preview,filename")

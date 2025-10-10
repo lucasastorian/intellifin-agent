@@ -174,7 +174,7 @@ class SearchCurrentReportsAction(BaseAction):
             depth_map = {'low': 5, 'medium': 10, 'high': 20}
             limit = depth_map[args.depth]
 
-            result = (
+            result = await (
                 self.database
                 .table("company_filings")
                 .select(
@@ -205,7 +205,7 @@ class SearchCurrentReportsAction(BaseAction):
         if not filing_ids:
             return {}
 
-        result = (
+        result = await (
             self.database
             .table("filing_attachments")
             .select("id,filing_id,exhibit_number,title,type,num_pages")

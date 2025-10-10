@@ -15,15 +15,15 @@ class CompanyProvisioner:
         self.database = database
         self.edgar_user_agent = edgar_user_agent
 
-    def should_provision(self) -> bool:
+    async def should_provision(self) -> bool:
         try:
-            result = self.database.table("companies").select("id").limit(1).execute()
+            result = await self.database.table("companies").select("id").limit(1).execute()
             return len(result.data) == 0
         except Exception:
             return True
 
-    def provision(self):
-        if not self.should_provision():
+    async def provision(self):
+        if not await self.should_provision():
             return
 
         print("  Provisioning companies database...", end="", flush=True)
@@ -32,7 +32,7 @@ class CompanyProvisioner:
         sec_data = self._fetch_sec_mapping()
         records = self._merge_data(csv_data, sec_data)
 
-        self.database.table("companies").upsert(records, on_conflict="cik").execute()
+        await self.database.table("companies").upsert(records, on_conflict="cik").execute()
 
         print(f" ✓ {len(records)} companies", flush=True)
 

@@ -62,7 +62,7 @@ class ReadDocumentAction(BaseAction):
             .select("*")
             .eq("id", filing_id)
             .limit(1)
-            .execute()
+await             .execute()
         )
 
         if not filing_result.data:
@@ -90,7 +90,7 @@ class ReadDocumentAction(BaseAction):
             .eq("filing_id", filing_id)
             .order("page")
             .limit(3)
-            .execute()
+await             .execute()
         )
 
         # Build preview content (passing sections/attachments/notes for 10-K/10-Q)
@@ -173,7 +173,7 @@ class ReadDocumentAction(BaseAction):
             .select("*")
             .eq("id", attachment_id)
             .limit(1)
-            .execute()
+await             .execute()
         )
 
         if not attachment_result.data:
@@ -200,7 +200,7 @@ class ReadDocumentAction(BaseAction):
             .eq("attachment_id", attachment_id)
             .order("page")
             .limit(3)
-            .execute()
+await             .execute()
         )
 
         preview = self._format_attachment_preview(attachment, pages_result.data)
@@ -232,7 +232,7 @@ class ReadDocumentAction(BaseAction):
             .select("*")
             .eq("id", note_id)
             .limit(1)
-            .execute()
+await             .execute()
         )
 
         if not note_result.data:
@@ -279,7 +279,7 @@ class ReadDocumentAction(BaseAction):
             .table("filing_section_pages")
             .select("section")
             .eq("filing_id", filing_id)
-            .execute()
+await             .execute()
         )
 
         # Return unique sections
@@ -293,7 +293,7 @@ class ReadDocumentAction(BaseAction):
             .select("id,exhibit_number,title,type,num_pages")
             .eq("filing_id", filing_id)
             .order("exhibit_number")
-            .execute()
+await             .execute()
         )
         return result.data
 
@@ -305,7 +305,7 @@ class ReadDocumentAction(BaseAction):
             .select("id,title,preview")
             .eq("filing_id", filing_id)
             .order("title")
-            .execute()
+await             .execute()
         )
         return result.data
 
@@ -317,7 +317,7 @@ class ReadDocumentAction(BaseAction):
             .select("*")
             .eq("id", company_id)
             .limit(1)
-            .execute()
+await             .execute()
         )
         return result.data[0] if result.data else {}
 

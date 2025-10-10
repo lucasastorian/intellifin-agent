@@ -10,32 +10,26 @@ from pipeline.enrichment.filing_summarizer import FilingSummarizer
 
 class FilingEightK(BaseFiling):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        openai_client = OpenAIClient()
-        self.filing_summarizer = FilingSummarizer(openai_client)
+    def __init__(self, *args, openai_client=None, **kwargs):
+        super().__init__(*args, openai_client=openai_client, **kwargs)
+        client = openai_client if openai_client else OpenAIClient()
+        self.filing_summarizer = FilingSummarizer(client)
 
     async def upsert(self):
         """Upserts the 8-K filing"""
         xbrl = await self._load_xbrl()
 
-        filing = self._upsert_filing(xbrl=xbrl)
+        filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
-        attachment_data = self._upsert_attachments(filing_id=filing['id'])
+        attachment_data = await self._upsert_attachments(filing_id=filing['id'])
 
-        try:
-            enriched_attachments = await self._enrich_attachments(attachment_data, filing)
-            await self._enrich_filing(filing, pages, enriched_attachments)
-        except Exception as e:
-            print(f"ERROR enriching 8-K {self.accession_number}: {e}")
-            import traceback
-            traceback.print_exc()
+        enriched_attachments = await self._enrich_attachments(attachment_data, filing)
+        await self._enrich_filing(filing, pages, enriched_attachments)
+        await self._update_filing_counts(filing_id=filing['id'])
 
-        self._update_filing_counts(filing_id=filing['id'])
-
-    def _upsert_filing(self, xbrl: XBRL) -> dict:
+    async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""
-        response = self.database.table("filings").upsert({
+        response = await self.database.table("filings").upsert({
             "form": self.filing.form,
             "items": self.filing.items.split(','),
             "press_release": '9.01' in self.filing.items,
@@ -61,9 +55,7 @@ class FilingEightK(BaseFiling):
         )
 
         if result and (result.get("title") or result.get("summary")):
-            await asyncio.to_thread(
-                lambda: self.database.table("filings").update({
-                    "title": result["title"],
-                    "summary": result["summary"]
-                }).eq("id", filing['id']).execute()
-            )
+            await self.database.table("filings").update({
+                "title": result["title"],
+                "summary": result["summary"]
+            }).eq("id", filing['id']).execute()

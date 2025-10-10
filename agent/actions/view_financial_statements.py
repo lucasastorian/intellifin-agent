@@ -90,7 +90,7 @@ class ViewFinancialStatementsAction(BaseAction):
             )
 
         try:
-            result = (
+            result = await (
                 self.database
                 .table("company_financial_statements")
                 .select("data,report_date,fiscal_year,fiscal_period,form")

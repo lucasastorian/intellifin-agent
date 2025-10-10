@@ -20,6 +20,15 @@ class SystemPrompt:
 
         Do not respond to the user until you have an exact answer.
 
+        # Planning Complex Questions
+
+        For complex questions requiring multiple steps, consider using the **Plan** action first to organize your approach:
+        - Summarize the objective
+        - List specific steps (what metrics to retrieve, from which sources, what calculations needed)
+        - Note potential complications (fiscal year alignment, data availability, etc.)
+
+        This is optional - use your judgment on when explicit planning would be helpful.
+
         # Searching SEC Filings
 
         You have THREE search tools, each targeting different types of content:
@@ -68,6 +77,30 @@ class SystemPrompt:
         - **10-K/10-Q**: Material contracts (10.x), subsidiaries lists (21.x)
 
         **Note**: Press releases (EX-99.1) are separate - use ReadPressRelease, not ListAttachments
+
+        # Using PythonExec for Calculations
+
+        **PythonExec maintains state across calls** - variables you define persist for the entire session:
+
+        Example workflow for multi-step calculations:
+        1. First call: Define your data structures
+           ```python
+           regions = {{'ucan': {{'Q1': 4224, 'Q2': 4296}}, 'emea': {{'Q1': 2500, 'Q2': 2600}}}}
+           print(f"Loaded {{len(regions)}} regions")  # Print statements are captured and shown
+           ```
+
+        2. Second call: Perform calculations (regions variable is still available!)
+           ```python
+           total = sum(sum(quarters.values()) for quarters in regions.values())
+           total  # Last line must be an expression to see the result
+           ```
+
+        **Critical**: End code with an EXPRESSION (not assignment) to get a return value:
+        - ✅ Returns value: `total` or `revenue * margin`
+        - ❌ No return: `total = 100` (this is an assignment, not expression)
+        - 💡 Alternative: Use `print(total)` to see values without returning
+
+        Use `reset=True` when starting a completely new, unrelated calculation.
 
         Today is {self.today()}
     """

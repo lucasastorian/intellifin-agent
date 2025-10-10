@@ -76,7 +76,7 @@ class ReadFilingAction(BaseAction):
                        thought=args.thought)
 
         # Get max page and metadata using view
-        max_page_result = (
+        max_page_result = await (
             self.database
             .table("company_filing_pages")
             .select("*")
@@ -139,7 +139,7 @@ class ReadFilingAction(BaseAction):
             self.log_error(f"Range exceeds {self.max_pages} pages, truncating to {start}–{end}")
 
         # Query pages using view
-        pages_result = (
+        pages_result = await (
             self.database
             .table("company_filing_pages")
             .select("page,content")

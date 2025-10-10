@@ -173,7 +173,7 @@ class SearchFilingNotesAction(BaseAction):
             depth_map = {'low': 10, 'medium': 15, 'high': 30}
             limit = depth_map[args.depth]
 
-            result = query.vector_search(
+            result = await query.vector_search(
                 args.excerpt_description,
                 "embedding",  # Vector search on embedding field (has header context)
                 topk=limit,

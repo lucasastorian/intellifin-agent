@@ -16,7 +16,7 @@ from pipeline.enrichment.note_preview_generator import NotePreviewGenerator
 
 class BaseFiling(ABC):
 
-    def __init__(self, filing: EntityFiling, company: dict, database: Database):
+    def __init__(self, filing: EntityFiling, company: dict, database: Database, openai_client: Optional[OpenAIClient] = None):
         self.filing = filing
         self.company = company
         self.company_id = company['id']
@@ -28,9 +28,10 @@ class BaseFiling(ABC):
 
         self.markdown_chunker = MarkdownChunker()
 
-        openai_client = OpenAIClient()
-        self.attachment_summarizer = AttachmentSummarizer(openai_client)
-        self.note_preview_generator = NotePreviewGenerator(openai_client)
+        # Use provided client or create new one
+        client = openai_client if openai_client else OpenAIClient()
+        self.attachment_summarizer = AttachmentSummarizer(client)
+        self.note_preview_generator = NotePreviewGenerator(client)
 
     @abstractmethod
     async def upsert(self):
@@ -38,12 +39,14 @@ class BaseFiling(ABC):
         raise NotImplementedError
 
     async def _load_xbrl(self) -> XBRL:
-        """Async wrapper for blocking edgartools xbrl() call"""
-        return await asyncio.to_thread(self.filing.xbrl)
+        """Load XBRL using async SGML loading (caches result)"""
+        sgml = await self.filing.sgml_async()
+        return sgml.xbrl
 
     async def _load_html(self) -> str:
-        """Async wrapper for blocking edgartools html() call"""
-        return await asyncio.to_thread(self.filing.html)
+        """Load HTML using async SGML loading (caches result)"""
+        sgml = await self.filing.sgml_async()
+        return sgml.html()
 
     @staticmethod
     def infer_attachment_type(exhibit_number: str) -> str:
@@ -108,7 +111,7 @@ class BaseFiling(ABC):
         parser = Parser(content=html_content)
         pages = parser.get_pages()
 
-        response = self.database.table("filing_pages").upsert([{
+        response = await self.database.table("filing_pages").upsert([{
             "page": page['page'],
             "content": page['content'],
             "filing_id": filing_id,
@@ -133,12 +136,12 @@ class BaseFiling(ABC):
                                     "filename": note.html_file_name, "filing_id": filing_id,
                                     "company_id": self.company_id})
 
-        response = self.database.table("filing_notes").upsert(processed_notes,
+        response = await self.database.table("filing_notes").upsert(processed_notes,
                                                               on_conflict="filing_id,filename").execute()
 
         note_ids = [note['id'] for note in response.data]
 
-        self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
+        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
 
         # Pass note IDs for enrichment
         await self._enrich_note_previews(note_ids)
@@ -192,11 +195,11 @@ class BaseFiling(ABC):
 
         return "\n".join(parts)
 
-    def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
+    async def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
         """Chunks filing notes and upserts them"""
-        company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
+        company_data = (await self.database.table("companies").select("*").eq("id", self.company_id).execute()).data[0]
 
-        filing_data = self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute().data[0]
+        filing_data = (await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute()).data[0]
 
         all_chunks = []
 
@@ -217,7 +220,7 @@ class BaseFiling(ABC):
                 })
 
         if all_chunks:
-            self.database.table("filing_note_chunks").upsert(
+            await self.database.table("filing_note_chunks").upsert(
                 all_chunks,
                 on_conflict="filing_note_id,index"
             ).execute()
@@ -236,7 +239,7 @@ class BaseFiling(ABC):
             database=self.database,
             fiscal_period=fiscal_period
         )
-        statements.upsert_statements()
+        await statements.upsert_statements()
 
     @staticmethod
     def _flatten_note(content: str) -> Optional[str]:
@@ -263,18 +266,18 @@ class BaseFiling(ABC):
 
         return ''.join([str(element) for element in elements])
 
-    def _update_filing_counts(self, filing_id: int):
+    async def _update_filing_counts(self, filing_id: int):
         """Updates the filing with page count and attachment count"""
         num_pages = self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
 
         num_attachments = self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
 
-        self.database.table("filings").update({
+        await self.database.table("filings").update({
             "num_pages": num_pages,
             "num_attachments": num_attachments
         }).eq("id", filing_id).execute()
 
-    def _upsert_attachments(self, filing_id: int, exhibit_filter=None) -> List[Dict]:
+    async def _upsert_attachments(self, filing_id: int, exhibit_filter=None) -> List[Dict]:
         """
         Upserts attachments (exhibits) for filings, returns data for enrichment.
 
@@ -305,7 +308,7 @@ class BaseFiling(ABC):
 
             attachment_type = self.infer_attachment_type(exhibit_number)
 
-            attachment_response = self.database.table("filing_attachments").upsert({
+            attachment_response = await self.database.table("filing_attachments").upsert({
                 "exhibit_number": exhibit_number,
                 "filename": document.document or f"ex-{exhibit_number}",
                 "description": document.description,
@@ -320,7 +323,7 @@ class BaseFiling(ABC):
 
             attachment_id = attachment_response.data[0]['id']
 
-            self.database.table("filing_attachment_pages").upsert([{
+            await self.database.table("filing_attachment_pages").upsert([{
                 "page": page['page'],
                 "content": page['content'],
                 "attachment_id": attachment_id,
@@ -330,7 +333,7 @@ class BaseFiling(ABC):
 
             # Only chunk press releases (99 exhibits) for vector search
             if attachment_type == "press_release":
-                self._upsert_filing_attachment_chunks(
+                await self._upsert_filing_attachment_chunks(
                     pages=pages,
                     attachment_id=attachment_id,
                     filing_id=filing_id,
@@ -342,7 +345,7 @@ class BaseFiling(ABC):
             attachment_data.append({
                 "attachment_id": attachment_id,
                 "exhibit_number": exhibit_number,
-                "pages": pages[:10]
+                "pages": pages[:5]
             })
 
         return attachment_data
@@ -381,7 +384,7 @@ class BaseFiling(ABC):
 
         return "\n".join(parts)
 
-    def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int,
+    async def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int,
                                          attachment_type: str, exhibit_number: str, description: str = None):
         """Chunks attachment pages and upserts them with embedding context"""
         header = self._build_attachment_embedding_header(attachment_type, exhibit_number, description)
@@ -400,7 +403,7 @@ class BaseFiling(ABC):
             } for i, chunk in enumerate(chunks)]
 
         if data:
-            self.database.table("filing_attachment_chunks").upsert(
+            await self.database.table("filing_attachment_chunks").upsert(
                 data,
                 on_conflict="attachment_id,index"
             ).execute()
@@ -417,7 +420,15 @@ class BaseFiling(ABC):
             for att in attachment_data
         ]
 
-        summaries = await asyncio.gather(*tasks, return_exceptions=True)
+        # Add 30 second timeout per attachment
+        try:
+            summaries = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0 * len(tasks)
+            )
+        except asyncio.TimeoutError:
+            print(f"WARNING: Attachment enrichment timed out after {30 * len(tasks)}s")
+            summaries = [Exception("Timeout") for _ in tasks]
 
         updates = []
         enriched = []
@@ -445,12 +456,10 @@ class BaseFiling(ABC):
 
         # Batch upsert all attachments at once (SELECT-based INSERT pulls missing fields)
         if updates:
-            await asyncio.to_thread(
-                lambda: self.database.table("filing_attachments").upsert(
-                    updates,
-                    on_conflict="id"
-                ).execute()
-            )
+            await self.database.table("filing_attachments").upsert(
+                updates,
+                on_conflict="id"
+            ).execute()
 
         return enriched
 
@@ -471,7 +480,15 @@ class BaseFiling(ABC):
             for note in notes.data
         ]
 
-        previews = await asyncio.gather(*tasks, return_exceptions=True)
+        # Add 15 second timeout per note
+        try:
+            previews = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=15.0 * len(tasks)
+            )
+        except asyncio.TimeoutError:
+            print(f"WARNING: Note preview enrichment timed out after {15 * len(tasks)}s")
+            previews = [Exception("Timeout") for _ in tasks]
 
         updates = []
         for note, result in zip(notes.data, previews):
@@ -487,9 +504,7 @@ class BaseFiling(ABC):
 
         # Batch upsert all notes at once (SELECT-based INSERT pulls missing fields)
         if updates:
-            await asyncio.to_thread(
-                lambda: self.database.table("filing_notes").upsert(
-                    updates,
-                    on_conflict="id"
-                ).execute()
-            )
+            await self.database.table("filing_notes").upsert(
+                updates,
+                on_conflict="id"
+            ).execute()

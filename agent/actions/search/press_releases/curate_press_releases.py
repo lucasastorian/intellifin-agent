@@ -8,6 +8,7 @@ from agent.action_response import ActionResponse, ContextRefinement
 
 
 class CuratePressReleasesAction(BaseAction):
+    MAX_SELECTED_EXCERPTS = 15  # Hard limit on curation
 
     def __init__(self, excerpts: List[dict], original_search_message_id: str, database: Database,
                  edgar_user_agent: str, start_year: int = 2017):

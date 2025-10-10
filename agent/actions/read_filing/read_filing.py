@@ -39,7 +39,7 @@ class ReadFilingAction(BaseAction):
         self.log_start("ReadFiling", params=f"filing_id={args.filing_id}", thought=args.thought)
 
         # Get filing metadata
-        filing_result = (
+        filing_result = await (
             self.database
             .table("company_filings")
             .select("*")
@@ -63,7 +63,7 @@ class ReadFilingAction(BaseAction):
         filing = filing_result.data[0]
 
         # Get attachments
-        attachments_result = (
+        attachments_result = await (
             self.database
             .table("company_filing_attachments")
             .select("id,exhibit_number,title,attachment_type,num_pages,description")
@@ -75,7 +75,7 @@ class ReadFilingAction(BaseAction):
         attachments = attachments_result.data
 
         # Get notes
-        notes_result = (
+        notes_result = await (
             self.database
             .table("company_filing_notes")
             .select("id,title,filename")

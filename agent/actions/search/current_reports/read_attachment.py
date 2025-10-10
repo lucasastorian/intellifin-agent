@@ -76,7 +76,7 @@ class ReadAttachmentAction(BaseAction):
                        thought=args.thought)
 
         # Get attachment + filing + company metadata in one query using view
-        result = (
+        result = await (
             self.database
             .table("company_filing_attachments")
             .select("*")
@@ -162,7 +162,7 @@ class ReadAttachmentAction(BaseAction):
             self.log_error(f"Range exceeds {self.max_pages} pages, truncating to {start}–{end}")
 
         # Query pages
-        pages_result = (
+        pages_result = await (
             self.database
             .table("filing_attachment_pages")
             .select("page,content")

@@ -190,7 +190,7 @@ At least one option must be specified."""
             .eq("filing_id", self.filing_id)
             .eq("section", section_key)
             .order("page")
-            .execute()
+await             .execute()
         )
 
         if not result.data:
@@ -212,7 +212,7 @@ At least one option must be specified."""
             .eq("filing_id", self.filing_id)
             .eq("exhibit_number", exhibit_number)
             .limit(1)
-            .execute()
+await             .execute()
         )
 
         if not att_result.data:
@@ -229,7 +229,7 @@ At least one option must be specified."""
             .eq("attachment_id", attachment_id)
             .order("page")
             .limit(15)  # Limit to 15 pages
-            .execute()
+await             .execute()
         )
 
         if not pages_result.data:
@@ -251,7 +251,7 @@ At least one option must be specified."""
             .eq("filing_id", self.filing_id)
             .eq("title", note_title)
             .limit(1)
-            .execute()
+await             .execute()
         )
 
         if not note_result.data:
@@ -277,7 +277,7 @@ At least one option must be specified."""
             .gte("page", start_page)
             .lte("page", end_page)
             .order("page")
-            .execute()
+await             .execute()
         )
 
         if not result.data:
