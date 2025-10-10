@@ -61,7 +61,9 @@ class FilingEightK(BaseFiling):
         )
 
         if result and (result.get("title") or result.get("summary")):
-            self.database.table("filings").update({
-                "title": result["title"],
-                "summary": result["summary"]
-            }).eq("id", filing['id']).execute()
+            await asyncio.to_thread(
+                lambda: self.database.table("filings").update({
+                    "title": result["title"],
+                    "summary": result["summary"]
+                }).eq("id", filing['id']).execute()
+            )

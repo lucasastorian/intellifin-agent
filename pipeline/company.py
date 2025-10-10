@@ -76,13 +76,11 @@ class Company:
 
             return filing.form
 
-        # Process all filings concurrently
         results = await asyncio.gather(
             *[upsert_filing_async(filing) for filing in filings],
             return_exceptions=True  # Capture exceptions instead of raising
         )
 
-        # Log any exceptions that occurred
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 print(f"ERROR syncing filing {filings[i].accession_number}: {result}")

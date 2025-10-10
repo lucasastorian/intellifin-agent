@@ -140,9 +140,8 @@ class BaseFiling(ABC):
 
         self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
 
-        note_data = [(note_id, processed_note['title'], processed_note['content'])
-                     for note_id, processed_note in zip(note_ids, processed_notes)]
-        await self._enrich_note_previews(note_data)
+        # Pass note IDs for enrichment
+        await self._enrich_note_previews(note_ids)
 
         return note_ids
 
@@ -292,7 +291,6 @@ class BaseFiling(ABC):
 
             exhibit_number = document.document_type.replace("EX-", "")
 
-            # Apply custom filter if provided
             if exhibit_filter and not exhibit_filter(exhibit_number):
                 continue
 
@@ -322,7 +320,6 @@ class BaseFiling(ABC):
 
             attachment_id = attachment_response.data[0]['id']
 
-            # Upsert attachment pages
             self.database.table("filing_attachment_pages").upsert([{
                 "page": page['page'],
                 "content": page['content'],
@@ -363,7 +360,6 @@ class BaseFiling(ABC):
         if name:
             parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
 
-        # Sector/Industry
         sector = self.company.get('sector')
         industry = self.company.get('industry')
         if sector or industry:
@@ -371,14 +367,12 @@ class BaseFiling(ABC):
             industry_str = f"Industry: {industry}" if industry else ""
             parts.append(" | ".join(filter(None, [sector_str, industry_str])))
 
-        # Filing metadata
         filing_parts = [f"Form {self.filing.form}"]
         filing_parts.append(f"Filed: {self.filing_date}")
         if self.report_date:
             filing_parts.append(f"Report Date: {self.report_date}")
         parts.append(" | ".join(filing_parts))
 
-        # Attachment info
         attachment_display = attachment_type.replace('_', ' ').title()
         attachment_parts = [f"Exhibit {exhibit_number}", attachment_display]
         if description:
@@ -435,6 +429,7 @@ class BaseFiling(ABC):
                 continue
 
             if result and (result.get("title") or result.get("summary")):
+                # Only pass changed fields - UpsertBuilder will pull missing NOT NULL fields from existing row
                 updates.append({
                     "id": att["attachment_id"],
                     "title": result["title"],
@@ -448,39 +443,53 @@ class BaseFiling(ABC):
             else:
                 print(f"WARNING: Attachment {att['exhibit_number']} returned empty result: {result}")
 
-        for update in updates:
-            self.database.table("filing_attachments").update({
-                "title": update["title"],
-                "summary": update["summary"]
-            }).eq("id", update["id"]).execute()
+        # Batch upsert all attachments at once (SELECT-based INSERT pulls missing fields)
+        if updates:
+            await asyncio.to_thread(
+                lambda: self.database.table("filing_attachments").upsert(
+                    updates,
+                    on_conflict="id"
+                ).execute()
+            )
 
         return enriched
 
-    async def _enrich_note_previews(self, note_data: List[tuple]):
-        """Generate one-sentence previews for all notes in parallel"""
-        if not note_data:
+    async def _enrich_note_previews(self, note_ids: List[int]):
+        """Generate one-sentence previews for all notes in parallel
+
+        Args:
+            note_ids: List of note IDs to enrich
+        """
+        if not note_ids:
             return
 
+        # Fetch note titles and content for preview generation
+        notes = self.database.table("filing_notes").select("id,title,content").in_("id", note_ids).execute()
+
         tasks = [
-            self.note_preview_generator.generate(title, content)
-            for note_id, title, content in note_data
+            self.note_preview_generator.generate(note['title'], note['content'])
+            for note in notes.data
         ]
 
         previews = await asyncio.gather(*tasks, return_exceptions=True)
 
         updates = []
-        for (note_id, title, content), result in zip(note_data, previews):
+        for note, result in zip(notes.data, previews):
             if isinstance(result, Exception):
                 continue
 
             if result:
+                # Only pass changed fields - UpsertBuilder will pull missing NOT NULL fields from existing row
                 updates.append({
-                    "id": note_id,
+                    "id": note['id'],
                     "preview": result
                 })
 
-        # Update notes (use update() not upsert() since we already have IDs)
-        for update in updates:
-            self.database.table("filing_notes").update({
-                "preview": update["preview"]
-            }).eq("id", update["id"]).execute()
+        # Batch upsert all notes at once (SELECT-based INSERT pulls missing fields)
+        if updates:
+            await asyncio.to_thread(
+                lambda: self.database.table("filing_notes").upsert(
+                    updates,
+                    on_conflict="id"
+                ).execute()
+            )

@@ -26,6 +26,12 @@ class VectorStore:
         self.tomb_file = self.base_path.with_suffix('.tomb.json')
         self._lock = threading.RLock()
 
+        # Memmap cache to prevent file descriptor leaks
+        self._vectors_mmap = None
+        self._ids_mmap = None
+        self._vec_size = None  # Track file size when memmap was created
+        self._id_size = None
+
         # Create directory and files if missing
         self.vec_file.parent.mkdir(parents=True, exist_ok=True)
         self.vec_file.touch(exist_ok=True)
@@ -69,6 +75,55 @@ class VectorStore:
             f.flush()
             os.fsync(f.fileno())
 
+    def _invalidate_cache(self):
+        """Invalidate memmap cache - call after writes"""
+        if self._vectors_mmap is not None:
+            del self._vectors_mmap
+            self._vectors_mmap = None
+        if self._ids_mmap is not None:
+            del self._ids_mmap
+            self._ids_mmap = None
+        self._vec_size = None
+        self._id_size = None
+
+    def _get_memmaps(self):
+        """Get cached memmaps or create new ones if files changed.
+
+        Returns:
+            (vectors_mmap, ids_mmap, total_count) or (None, None, 0) if empty
+        """
+        vec_size = self.vec_file.stat().st_size
+        id_size = self.id_file.stat().st_size
+
+        # Return empty if no data
+        if vec_size == 0 or id_size == 0:
+            return None, None, 0
+
+        # Refresh cache if file sizes changed
+        if vec_size != self._vec_size or id_size != self._id_size:
+            self._invalidate_cache()
+            self._vectors_mmap = np.memmap(self.vec_file, dtype=np.float32, mode='r')
+            self._ids_mmap = np.memmap(self.id_file, dtype=np.int64, mode='r')
+            self._vec_size = vec_size
+            self._id_size = id_size
+
+        total_count = len(self._vectors_mmap) // self.dim
+        return self._vectors_mmap, self._ids_mmap, total_count
+
+    def close(self):
+        """Close and cleanup memmap resources"""
+        with self._lock:
+            self._invalidate_cache()
+
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        self.close()
+        return False
+
     def count(self) -> int:
         """Return number of vectors (excluding tombstones)"""
         total = self.id_file.stat().st_size // 8
@@ -76,10 +131,10 @@ class VectorStore:
 
     def has_id(self, id_: int) -> bool:
         """Check if an ID exists in the store (ignoring tombstones)"""
-        if self.id_file.stat().st_size == 0:
-            return False
         with self._lock:
-            ids = np.memmap(self.id_file, dtype=np.int64, mode='r')
+            _, ids, count = self._get_memmaps()
+            if count == 0:
+                return False
             return int(id_) in ids
 
     def add(self, id_: int, vec: np.ndarray):
@@ -120,6 +175,9 @@ class VectorStore:
                     fcntl.flock(vf.fileno(), fcntl.LOCK_UN)
                     fcntl.flock(idf.fileno(), fcntl.LOCK_UN)
 
+            # Invalidate cache after write
+            self._invalidate_cache()
+
     def tombstone(self, id_: int):
         """Mark an ID as deleted"""
         with self._lock:
@@ -152,18 +210,13 @@ class VectorStore:
             query_vec = query_vec / norm
 
         with self._lock:
-            # Check if vector file is empty before attempting memmap
-            if self.vec_file.stat().st_size == 0:
-                return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
-
-            # Load vectors and IDs via memmap (protected by lock to ensure consistency)
-            vectors = np.memmap(self.vec_file, dtype=np.float32, mode='r')
-            total_count = len(vectors) // self.dim
+            # Get cached memmaps
+            vectors, ids, total_count = self._get_memmaps()
             if total_count == 0:
                 return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
 
+            # Reshape vectors
             vectors = vectors.reshape(total_count, self.dim)
-            ids = np.memmap(self.id_file, dtype=np.int64, mode='r')
 
             # Ensure lengths match (safety check)
             id_count = len(ids)
@@ -199,4 +252,5 @@ class VectorStore:
                 idx = np.argpartition(scores, -topk)[-topk:]
                 idx = idx[np.argsort(scores[idx])[::-1]]
 
-            return ids[idx], scores[idx]
+            # Copy results (don't return views into memmap)
+            return ids[idx].copy(), scores[idx].copy()

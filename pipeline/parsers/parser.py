@@ -541,8 +541,9 @@ class Parser:
         if self.input_char_count > 0:
             retention_ratio = total_output_chars / self.input_char_count
             if retention_ratio < 0.95:
-                logger.warning(f"⚠️  Content loss detected: {100 * (1 - retention_ratio):.1f}% of input lost!")
-                logger.warning(f"   Input: {self.input_char_count} chars, Output: {total_output_chars} chars")
+                # logger.warning(f"⚠️  Content loss detected: {100 * (1 - retention_ratio):.1f}% of input lost!")
+                # logger.warning(f"   Input: {self.input_char_count} chars, Output: {total_output_chars} chars")
+                pass
             else:
                 logger.debug(f"✓ Content retention: {100 * retention_ratio:.1f}%")
 

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
+from agent.action_response import ActionResponse
 
 
 class PythonExec(BaseModel):
@@ -76,7 +77,9 @@ class PythonExecAction(BaseAction):
         except RuntimeError as e:
             self.log_start("PythonExec")
             self.log_error(f"Validation failed: {e}")
-            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            return ActionResponse(
+                message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            )
 
         # Show code in logs (truncate if very long)
         code_preview = args.code if len(args.code) <= 100 else args.code[:97] + "..."
@@ -129,13 +132,17 @@ class PythonExecAction(BaseAction):
                 content = f"**Code**:\n```python\n{args.code}\n```\n\n**Executed** (no return value)"
 
             self.log_done(f"Result: {result}")
-            return Message(role="tool", status="completed", content=content, action_id=action.id)
+            return ActionResponse(
+                message=Message(role="tool", status="completed", content=content, action_id=action.id)
+            )
 
         except Exception as e:
             tb = traceback.format_exc()
             error_msg = f"Error executing code: {str(e)}\n\n```python\n{args.code}\n```\n\n```\n{tb}\n```"
             self.log_error(f"Execution failed: {e}")
-            return Message(role="tool", status="completed", content=error_msg, error=True, action_id=action.id)
+            return ActionResponse(
+                message=Message(role="tool", status="completed", content=error_msg, error=True, action_id=action.id)
+            )
 
     @staticmethod
     def validate(action: Action) -> PythonExec:

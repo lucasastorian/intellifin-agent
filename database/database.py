@@ -79,6 +79,14 @@ class Database:
                 # Don't fail close if checkpoint fails
                 pass
             finally:
+                # Close all vector stores
+                if hasattr(self, 'vector_stores'):
+                    for vs in self.vector_stores.values():
+                        try:
+                            vs.close()
+                        except Exception:
+                            pass
+
                 # Close embedding cache LMDB connection
                 if hasattr(self, 'embedder') and self.embedder and self.embedder.cache:
                     try:

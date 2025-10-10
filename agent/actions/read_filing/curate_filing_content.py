@@ -108,14 +108,14 @@ Choose 'keep' when you need the full details. Choose 'summarize' for high-level 
                 refined_content = self._build_selected_pages_content(args.selected_pages)
                 summary_msg = f"Kept {len(args.selected_pages)} of {len(self.pages_read)} pages"
             else:  # summarize
-                refined_content = f"**[Summarized Content]**\n\n{args.summary}"
+                refined_content = f"**[Summarized Content]**\n\n{args.summary}\n\n*Note: Original content replaced with summary by curation step to reduce context size.*"
                 summary_msg = f"Summarized {len(self.pages_read)} pages"
         else:  # note
             if args.curation_mode == 'keep':
                 refined_content = None  # Keep original content
                 summary_msg = "Kept full note content"
             else:  # summarize
-                refined_content = f"**[Summarized Note]**\n\n{args.summary}"
+                refined_content = f"**[Summarized Note]**\n\n{args.summary}\n\n*Note: Original content replaced with summary by curation step to reduce context size.*"
                 summary_msg = "Summarized note content"
 
         self.log_done(summary_msg)

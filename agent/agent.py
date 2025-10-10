@@ -43,7 +43,7 @@ class Agent:
 
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            # PythonExecActionTk(database=self.database, edgar_user_agent=self.edgar_user_agent)
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         dynamic_actions = []

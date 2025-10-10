@@ -57,21 +57,94 @@ class UpsertBuilder:
                     f"on_conflict {tuple(self.on_conflict_cols)} does not match any declared composite UNIQUE."
                 )
 
+    def _validate_upsert_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate upsert data with smart handling for updates vs inserts
+
+        For primary key upserts (e.g., on_conflict="id"), we:
+        - Still validate types and field-level constraints for provided fields
+        - Skip the "missing required fields" check since PK upserts are always updates
+
+        For other upserts, we do full validation including required fields.
+        """
+        if not isinstance(row, dict):
+            raise ValueError(f"Upsert data for table '{self.table}' must be a dictionary")
+
+        # Get table class and instantiate it (needed for instance methods)
+        table_cls = self.schema.get_table(self.table)
+        table_instance = table_cls()
+        table_instance._schema = self.schema
+
+        table_fields = table_instance.get_fields()
+
+        # Check if any on_conflict field is a primary key
+        is_pk_update = any(
+            table_fields.get(col, None) and table_fields[col].primary_key
+            for col in self.on_conflict_cols
+        )
+
+        validated_data = {}
+
+        # Validate each provided field (type checking, constraints)
+        for field_name, value in row.items():
+            if field_name in table_fields:
+                field_desc = table_fields[field_name]
+
+                # Allow primary key fields if they're in on_conflict
+                if field_desc.primary_key and field_name not in self.on_conflict_cols:
+                    raise ValueError(
+                        f"Cannot manually set primary key field '{field_name}' in table '{self.table}'. "
+                        f"Primary keys are auto-generated."
+                    )
+
+                # Still do type validation and field-level constraints
+                field_desc.set_context(self.table, field_name, self.schema)
+                validated_data[field_name] = field_desc.validate(value)
+            else:
+                raise ValueError(f"Field '{field_name}' not found in table '{self.table}'")
+
+        # Only check for missing required fields if this is a true insert
+        # (PK upserts are always updates, so missing fields are fine)
+        if not is_pk_update:
+            table_instance._validate_required_fields(validated_data, table_fields)
+
+        return validated_data
+
     def execute(self):
         """Execute the UPSERT query."""
-        validated_rows = [self.db._validate_insert_data(self.table, row) for row in self.rows]
+        # For upsert, we need special validation that allows on_conflict fields (even if they're primary keys)
+        validated_rows = [self._validate_upsert_row(row) for row in self.rows]
         with_defaults = [self.db._apply_runtime_defaults(self.table, row) for row in validated_rows]
         serialized_rows = [self.db._serialize_json_fields(self.table, row) for row in with_defaults]
 
         if not serialized_rows:
             return Result([])
 
+        # Detect if we need SELECT-based INSERT for PK upserts with missing required fields
+        table_cls = self.schema.get_table(self.table)
+        table_fields = table_cls.get_fields() if table_cls else {}
+
+        is_pk_conflict = any(
+            table_fields.get(col, None) and table_fields[col].primary_key
+            for col in self.on_conflict_cols
+        )
+
+        # Get required NOT NULL fields (excluding primary keys and fields with defaults)
+        required_fields = set()
+        for field_name, field_desc in table_fields.items():
+            if not field_desc.nullable and field_desc.default is None and not field_desc.primary_key:
+                required_fields.add(field_name)
+
+        provided_fields = set(serialized_rows[0].keys())
+        missing_required = required_fields - provided_fields
+
+        # Use SELECT-based INSERT if we're doing a PK upsert with missing required fields
+        use_select_insert = is_pk_conflict and missing_required and self.returning_all
+
         cols = list(serialized_rows[0].keys())
         num_cols = len(cols)
         max_vars = self.db._get_max_vars()
 
         # Check if table has vector fields - if so, disable executemany since we need RETURNING
-        table_cls = self.schema.get_table(self.table)
         has_vector_fields = False
         if table_cls:
             for field_name, field in table_cls.get_fields().items():
@@ -80,11 +153,57 @@ class UpsertBuilder:
                     break
 
         total_params = num_cols * len(serialized_rows)
-        use_executemany = total_params > max_vars and not has_vector_fields
+        use_executemany = total_params > max_vars and not has_vector_fields and not use_select_insert
 
         all_results = []
         with self.db.transaction():
-            if use_executemany:
+            if use_select_insert:
+                # Generate SELECT-based INSERT to pull missing NOT NULL fields from existing row
+                # This avoids validation errors when doing PK-based partial updates
+                pk_col = self.on_conflict_cols[0]  # Assuming single PK for now
+                all_cols = cols + list(missing_required)
+
+                for row in serialized_rows:
+                    # Build SELECT clause
+                    select_parts = []
+                    params = []
+
+                    for col in all_cols:
+                        if col in cols:
+                            # Provided field - use parameter
+                            select_parts.append("?")
+                            params.append(row[col])
+                        else:
+                            # Missing required field - pull from existing row
+                            select_parts.append(self.dialect.q(col))
+
+                    # Add PK value for WHERE clause
+                    params.append(row[pk_col])
+
+                    # Build UPDATE clause
+                    update_clauses = [
+                        f"{self.dialect.q(c)} = excluded.{self.dialect.q(c)}"
+                        for c in cols if c != pk_col
+                    ]
+                    action = f"DO UPDATE SET {', '.join(update_clauses)}" if update_clauses else "DO NOTHING"
+
+                    sql = (
+                        f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in all_cols)}) "
+                        f"SELECT {', '.join(select_parts)} "
+                        f"FROM {self.dialect.q(self.table)} "
+                        f"WHERE {self.dialect.q(pk_col)} = ? "
+                        f"ON CONFLICT ({self.dialect.q(pk_col)}) {action}"
+                    )
+
+                    if self.returning_all:
+                        sql += f" RETURNING *"
+
+                    rows = self.db._exec(sql, params)
+                    for r in rows:
+                        r = self.db._deserialize_json_fields(self.table, r)
+                        all_results.append(r)
+
+            elif use_executemany:
                 conflict_cols = ", ".join(self.dialect.q(c) for c in self.on_conflict_cols)
                 if self.do_nothing:
                     action = "DO NOTHING"
