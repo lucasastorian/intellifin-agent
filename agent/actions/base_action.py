@@ -26,8 +26,8 @@ class BaseAction(ABC):
         """Calls the action with the LLM provided action"""
         raise NotImplementedError
 
-    def sync_symbols(self, symbols: List[str], forms: Optional[List[str]] = None,
-                     start_date: Optional[str] = None, end_date: Optional[str] = None):
+    async def sync_symbols(self, symbols: List[str], forms: Optional[List[str]] = None,
+                           start_date: Optional[str] = None, end_date: Optional[str] = None):
         """Sync the filings for the symbols with optional filtering
 
         Args:
@@ -53,7 +53,7 @@ class BaseAction(ABC):
                     parts.append(f"({date_range})")
                 sync_desc += f" [{' '.join(parts)}]"
 
-            synced_count = company.sync(forms=forms, start_date=start_date, end_date=end_date)
+            synced_count = await company.sync(forms=forms, start_date=start_date, end_date=end_date)
 
             # Only show sync message if filings were actually synced
             if synced_count > 0:

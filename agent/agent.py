@@ -9,9 +9,9 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, SearchFilingsAction,
-                           SearchPressReleasesAction, SearchFilingNotesAction,  # SearchAttachmentsAction,
+                           SearchPressReleasesAction, SearchFilingNotesAction, SearchCurrentReportsAction,
                            ReadFilingAction, ReadPressReleaseAction, ReadAttachmentAction,
-                           ViewFinancialStatementsAction, PythonExecAction, SearchFilingSectionsAction)
+                           ViewFinancialStatementsAction, PythonExecAction, SearchFilingSectionsAction, )
 
 
 class Agent:
@@ -34,8 +34,8 @@ class Agent:
         self.messages.append(Message(role="user", status="completed", content=query))
 
         base_actions = [
-            # ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             # ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             # SearchFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             # SearchFilingNotesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
@@ -43,8 +43,10 @@ class Agent:
             # ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             # ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
+            # PythonExecActionTk(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
         dynamic_actions = []
@@ -99,6 +101,7 @@ class Agent:
     async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[
         List[ActionFollowUp]]:
         """Executes a single step in the agent loop"""
+        print(self.messages)
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
                                               actions=actions, allowed_actions=allowed_actions)
         self.messages.append(completion)

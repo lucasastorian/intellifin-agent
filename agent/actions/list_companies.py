@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
+from agent.action_response import ActionResponse
 
 
 class ListCompanies(BaseModel):
@@ -27,11 +28,19 @@ class ListCompaniesAction(BaseAction):
     async def call(self, action: Action):
         """Searches companies by name"""
         try:
-            args = self.validate(action)
-        except RuntimeError as e:
+            args = ListCompanies(**action.body)
+        except ValidationError as e:
             self.log_start("ListCompanies")
             self.log_error(f"Validation failed: {e}")
-            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=str(e),
+                    error=True,
+                    action_id=action.id
+                )
+            )
 
         params = f"'{args.query}'"
         self.log_start("ListCompanies", params, thought=args.thought)
@@ -53,11 +62,13 @@ class ListCompaniesAction(BaseAction):
 
         if not matches:
             self.log_done("No companies found")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"No companies found matching '{args.query}'",
-                action_id=action.id
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=f"No companies found matching '{args.query}'",
+                    action_id=action.id
+                )
             )
 
         content = self._format_to_md(matches)
@@ -65,15 +76,14 @@ class ListCompaniesAction(BaseAction):
         summary = f"Found {len(matches)} compan{'y' if len(matches) == 1 else 'ies'}"
         self.log_done(summary)
 
-        return Message(role="tool", status="completed", content=content, action_id=action.id)
-
-    @staticmethod
-    def validate(action: Action) -> ListCompanies:
-        """Validates the action against the Pydantic schema"""
-        try:
-            return ListCompanies(**action.body)
-        except ValidationError as e:
-            raise RuntimeError(f"Validation failed: {e}") from e
+        return ActionResponse(
+            message=Message(
+                role="tool",
+                status="completed",
+                content=content,
+                action_id=action.id
+            )
+        )
 
     @staticmethod
     def _format_to_md(companies: List[dict]) -> str:

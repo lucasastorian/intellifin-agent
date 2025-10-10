@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
+from agent.action_response import ActionResponse
 
 AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 
@@ -53,20 +54,6 @@ class ListFilings(BaseModel):
         _ = date.fromisoformat(v)
         return v
 
-    @classmethod
-    @field_validator("start_date")
-    def check_start_date(cls, v: str) -> str:
-        _ = date.fromisoformat(v)  # raises if invalid
-        return v
-
-    @classmethod
-    @field_validator("end_date")
-    def check_end_date(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return date.today().isoformat()
-        _ = date.fromisoformat(v)
-        return v
-
 
 class ListFilingsAction(BaseAction):
     name: str = 'ListFilings'
@@ -75,26 +62,36 @@ class ListFilingsAction(BaseAction):
     async def call(self, action: Action):
         """Calls the search filings actions and returns a MD table of """
         try:
-            args = self.validate(action)
-        except RuntimeError as e:
+            args = ListFilings(**action.body)
+        except ValidationError as e:
             self.log_start("ListFilings")
             self.log_error(f"Validation failed: {e}")
-            return Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=str(e),
+                    error=True,
+                    action_id=action.id
+                )
+            )
 
         params = f"{', '.join(args.symbols)} ({', '.join(args.forms)}), {args.start_date} → {args.end_date or ''}"
 
         self.log_start("ListFilings", params=params, thought=args.thought)
 
-        not_found = self.sync_symbols(symbols=args.symbols, forms=args.forms,
-                                       start_date=args.start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(symbols=args.symbols, forms=args.forms,
+                                            start_date=args.start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbols not found: {', '.join(sorted(not_found))}")
-            return Message(
-                role="tool",
-                status="completed",
-                content=f"Could not find the following symbols on EDGAR: {sorted(not_found)}",
-                error=True,
-                action_id=action.id
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content=f"Could not find the following symbols on EDGAR: {sorted(not_found)}",
+                    error=True,
+                    action_id=action.id
+                )
             )
 
         forms = self._expand_forms_with_amendments(args.forms)
@@ -116,8 +113,14 @@ class ListFilingsAction(BaseAction):
 
         if not filings_result.data:
             self.log_done("No filings found")
-            return Message(role="tool", status="completed", content="No filings in the requested range.",
-                           action_id=action.id)
+            return ActionResponse(
+                message=Message(
+                    role="tool",
+                    status="completed",
+                    content="No filings in the requested range.",
+                    action_id=action.id
+                )
+            )
 
         # Get company information for the header
         company_ids = {f['company_id'] for f in filings_result.data if f.get('company_id')}
@@ -153,20 +156,14 @@ class ListFilingsAction(BaseAction):
 
         self.log_done(summary)
 
-        return Message(
-            role="tool",
-            status="completed",
-            content=content,
-            action_id=action.id
+        return ActionResponse(
+            message=Message(
+                role="tool",
+                status="completed",
+                content=content,
+                action_id=action.id
+            )
         )
-
-    def validate(self, action: Action) -> ListFilings:
-        """Validates the action against the Pydantic schema"""
-        try:
-            return ListFilings(**action.body)
-
-        except ValidationError:
-            pass
 
     def _load_attachments(self, filing_ids: List[int]) -> dict:
         """Load all attachments for the given filing IDs, returns dict mapping filing_id -> list of attachments"""

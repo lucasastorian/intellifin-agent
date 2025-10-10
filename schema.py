@@ -191,7 +191,7 @@ class FilingSectionChunks(Table):
 
     index = Integer(nullable=False)
     page = Integer(nullable=False, index=True)  # original page number
-    content = Text(nullable=False, fts=True)
+    pages = JSONField(nullable=False)  # List of {page: int, content: str}
     embedding = Text(nullable=False, fts=True, vector=True)
     has_table = Boolean(default=False, index=True)
 
@@ -231,6 +231,7 @@ class CompanyFilingPages(View):
     filing_id = Field(table="filing_pages", field="filing_id")
     form = Field(table="filings", field="form")
     amendment = Field(table="filings", field="amendment")
+    title = Field(table="filings", field="title")
     items = Field(table="filings", field="items")
     press_release = Field(table="filings", field="press_release")
     fiscal_year = Field(table="filings", field="fiscal_year")
@@ -310,7 +311,7 @@ class CompanyFilingSectionChunks(View):
     section = Field(table="filing_section_chunks", field="section")
     index = Field(table="filing_section_chunks", field="index")
     page = Field(table="filing_section_chunks", field="page")
-    content = Field(table="filing_section_chunks", field="content")
+    pages = Field(table="filing_section_chunks", field="pages")
     embedding = Field(table="filing_section_chunks", field="embedding")
     has_table = Field(table="filing_section_chunks", field="has_table")
 
@@ -407,7 +408,8 @@ class FilingAttachmentChunks(Table):
     id = Serial()
     index = Integer(nullable=False)
     page = Integer(nullable=False)
-    content = Text(nullable=False, fts=True, vector=True)
+    pages = JSONField(nullable=False)  # List of {page: int, content: str}
+    embedding = Text(nullable=False, fts=True, vector=True)  # Header + content for vector search
     has_table = Boolean(nullable=False, default=False, index=True)
 
     attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)
@@ -428,6 +430,8 @@ class CompanyFilingAttachments(View):
     exhibit_number = Field(table="filing_attachments", field="exhibit_number")
     filename = Field(table="filing_attachments", field="filename")
     description = Field(table="filing_attachments", field="description")
+    title = Field(table="filing_attachments", field="title")
+    num_pages = Field(table="filing_attachments", field="num_pages")
     attachment_type = Field(table="filing_attachments", field="type")
 
     filing_id = Field(table="filing_attachments", field="filing_id")
@@ -487,7 +491,8 @@ class CompanyFilingAttachmentChunks(View):
     id = Field(table="filing_attachment_chunks", field="id")
     index = Field(table="filing_attachment_chunks", field="index")
     page = Field(table="filing_attachment_chunks", field="page")
-    content = Field(table="filing_attachment_chunks", field="content")
+    pages = Field(table="filing_attachment_chunks", field="pages")
+    embedding = Field(table="filing_attachment_chunks", field="embedding")
     has_table = Field(table="filing_attachment_chunks", field="has_table")
 
     attachment_id = Field(table="filing_attachment_chunks", field="attachment_id")
@@ -525,6 +530,7 @@ schema.add_table(FilingAttachmentPages)
 schema.add_table(FilingAttachmentChunks)
 schema.add_table(FilingSectionChunks)
 schema.add_table(FilingNoteChunks)
+schema.add_table(FilingSectionPages)
 
 schema.add_view(CompanyFilings)
 schema.add_view(CompanyFilingPages)

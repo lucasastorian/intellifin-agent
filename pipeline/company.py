@@ -78,8 +78,7 @@ class Company:
 
         # Process all filings concurrently in separate threads
         results = await asyncio.gather(
-            *[asyncio.to_thread(upsert_filing_sync, filing) for filing in filings],
-            return_exceptions=True
+            *[asyncio.to_thread(upsert_filing_sync, filing) for filing in filings]
         )
 
         synced_count = sum(1 for result in results if result is not None and not isinstance(result, Exception))

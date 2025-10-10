@@ -46,6 +46,11 @@ class MarkdownChunk:
         return sorted(page_content_data, key=lambda x: x["page"])
 
     @property
+    def pages(self) -> List[dict]:
+        """Returns a list of pages with their content - each page has 'page' and 'content' keys"""
+        return self.data
+
+    @property
     def embedding_text(self) -> str:
         """Get the text to use for embedding, with optional header prepended"""
         if self.header:

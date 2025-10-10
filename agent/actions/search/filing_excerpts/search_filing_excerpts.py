@@ -7,7 +7,7 @@ from datetime import date
 from agent.message import Action, Message
 from agent.action_response import ActionResponse, ActionFollowUp
 from agent.actions.base_action import BaseAction
-from agent.actions.search.curate_filing_excerpts import CurateFilingExcerptsAction
+from agent.actions.search.filing_excerpts.curate_filing_excerpts import CurateFilingExcerptsAction
 
 
 class SearchFilingSections(BaseModel):
@@ -104,8 +104,8 @@ class SearchFilingSectionsAction(BaseAction):
         self.log_start("SearchFilingSections", params=params, thought=args.thought)
 
         forms = self._get_forms_for_reports(args.reports)
-        not_found = self.sync_symbols(symbols=[args.symbol], forms=forms,
-                                      start_date=args.start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(symbols=[args.symbol], forms=forms,
+                                            start_date=args.start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return ActionResponse(
@@ -176,7 +176,7 @@ class SearchFilingSectionsAction(BaseAction):
                 self.database
                 .table("company_filing_section_chunks")
                 .select(
-                    "id,filing_id,section,index,page,content,has_table,form,filing_date,report_date,"
+                    "id,filing_id,section,index,page,pages,has_table,form,filing_date,report_date,"
                     "fiscal_year,fiscal_period,company_name,company_symbols"
                 )
                 .contains("company_symbols", args.symbol)
@@ -194,7 +194,7 @@ class SearchFilingSectionsAction(BaseAction):
 
             result = query.vector_search(
                 args.excerpt_description,
-                "content",
+                "embedding",
                 topk=limit,
                 return_scores=True
             ).execute()
@@ -239,34 +239,53 @@ class SearchFilingSectionsAction(BaseAction):
         output = []
         for i, r in enumerate(results):
             output.append(self._format_section_chunk(r, i))
-        return "\n".join(output) if output else "No results found."
+
+        if not output:
+            return "No results found."
+
+        # Add curation instructions
+        instructions = (
+            "\n**INSTRUCTIONS:** Review the excerpts above and select only those relevant to your search query using their IDs. "
+            "If none are relevant or only marginally useful, provide a brief summary of what you found instead."
+        )
+        return "\n".join(output) + instructions
 
     @staticmethod
     def _format_section_chunk(r: dict, index: int) -> str:
         """Format filing section chunk result"""
-        # Direct access - fail fast on missing required fields
+        from datetime import datetime
+
         excerpt_id = r['id']
         company_name = r['company_name']
         symbols = ','.join(r['company_symbols'])
         form = r['form']
         section = r['section'].replace('_', ' ').title()
-        filing_date = r['filing_date']
-        report_date = r['report_date']
-        page = r['page']
-        content = r['content'].strip()
 
-        # Optional fields (may be null in schema)
+        # Format dates naturally
+        filing_date = datetime.strptime(r['filing_date'], '%Y-%m-%d').strftime('%B %-d, %Y')
+        report_date = datetime.strptime(r['report_date'], '%Y-%m-%d').strftime('%B %-d, %Y')
+
+        pages = r['pages']
+        page_numbers = [p['page'] for p in pages]
+        page_display = f"Page {page_numbers[0]}" if len(
+            page_numbers) == 1 else f"Pages {page_numbers[0]}-{page_numbers[-1]}"
+
+        content_parts = []
+        for page_data in pages:
+            if len(pages) > 1:
+                content_parts.append(f"[Page {page_data['page']}]\n{page_data['content'].strip()}")
+            else:
+                content_parts.append(page_data['content'].strip())
+        content = "\n\n".join(content_parts)
+
         fiscal_year = r['fiscal_year']
         fiscal_period = r['fiscal_period']
-
-        # Score is injected by vector search
-        score = r.get('_score', 0.0)
 
         fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
             f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-                f"**[Excerpt #{index} | ID: {excerpt_id}] {section} (Page {page})** | Score: {score:.3f} | Filing #{r['filing_id']} | "
+                f"**[Excerpt #{index} | ID: {excerpt_id}] {section} ({page_display})** | Filing #{r['filing_id']} | "
                 f"{company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
                 f"{content}\n\n---\n"

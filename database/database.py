@@ -128,7 +128,32 @@ class Database:
         self.embedder = VoyageEmbeddings(model="voyage-3.5-lite", dimensions=512)
 
     def get_or_create_vector_store(self, table: str, column: str) -> VectorStore:
-        """Get or create a vector store for a table/column pair"""
+        """Get or create a vector store for a table/column pair
+
+        Args:
+            table: Table name
+            column: Column name (must have vector=True in schema)
+
+        Raises:
+            ValueError: If column doesn't have vector=True in schema
+        """
+        # Validate that column has vector=True in schema
+        if table not in self.schema.tables:
+            raise ValueError(f"Table '{table}' not found in schema")
+
+        table_cls = self.schema.tables[table]
+        fields = table_cls.get_fields()
+
+        if column not in fields:
+            raise ValueError(f"Column '{column}' not found in table '{table}'")
+
+        field = fields[column]
+        if not getattr(field, 'vector', False):
+            raise ValueError(
+                f"Column '{table}.{column}' does not have vector=True in schema. "
+                f"Cannot create vector store for non-vector column."
+            )
+
         key = (table, column)
         if key not in self.vector_stores:
             vector_dir = Path(self.base_path).parent / 'vectors'

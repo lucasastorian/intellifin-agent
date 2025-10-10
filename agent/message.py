@@ -11,6 +11,8 @@ class Action:
     status: Literal['streaming', 'parsed', 'completed', 'failed']
     body: dict
 
+    external_id: str = None  # OpenAI Responses API 'id' attribute for a ResponseFunctionToolCall
+
 
 @dataclass
 class Thought:
@@ -54,7 +56,7 @@ class Message:
                 content_blocks.append({"type": "text", "text": self.content})
 
             if self.actions:
-                action_blocks = [{"type": "tool_use", "id": self.action_id,
+                action_blocks = [{"type": "tool_use", "id": action.id,
                                   "name": action.name, "input": action.body} for action in self.actions]
 
                 content_blocks += action_blocks
@@ -66,6 +68,7 @@ class Message:
 
     def openai_format(self) -> List[dict]:
         """Formats the message as a list of items for the OpenAI Client (Responses API)"""
+        # NOTE: I think there's a mistake here...  We reuse the same xternal Id across parts... That may be incorrect !
         if self.role == "tool":
             return [{"call_id": self.action_id, "output": self.content, "type": "function_call_output"}]
 
@@ -76,7 +79,7 @@ class Message:
                          "summary": [{"text": summary, "type": "summary_text"} for summary in thought.summaries]}
                         for thought in self.thoughts]
 
-            tool_calls = [{"call_id": action.id, 'type': 'function_call', "name": action.name,
+            tool_calls = [{"id": action.external_id, "call_id": action.id, 'type': 'function_call', "name": action.name,
                            "arguments": json.dumps(action.body)} for action in self.actions]
 
             if self.content:

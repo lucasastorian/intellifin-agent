@@ -72,8 +72,8 @@ class ViewFinancialStatementsAction(BaseAction):
             load_start_date = args.start_date
             forms = ['10-K', '10-K/A', '20-F', '20-F/A']
 
-        not_found = self.sync_symbols(symbols=[args.symbol], forms=forms,
-                                       start_date=load_start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(symbols=[args.symbol], forms=forms,
+                                            start_date=load_start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return Message(

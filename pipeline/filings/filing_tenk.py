@@ -25,7 +25,7 @@ class FilingTenK(BaseFiling):
         self._upsert_filing_notes(filing_id=filing_id)
         self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
         attachment_data = self._upsert_attachments(filing_id=filing_id)
-        self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
+        self._upsert_filing_chunks(pages=pages, filing_id=filing_id, filing_type='10-K')
 
         # Run async enrichment for attachments
         if attachment_data:
@@ -52,69 +52,15 @@ class FilingTenK(BaseFiling):
         return response.data[0]['id']
 
     def _upsert_attachments(self, filing_id: int) -> List[Dict]:
-        """Upserts material attachments (exhibits) for 10-K filings, returns data for enrichment"""
-        documents = self.filing.attachments.documents
-        attachment_data = []
-
+        """Upserts material attachments (exhibits) for 10-K filings"""
         # Only pull material exhibits: contracts, M&A, debt instruments, press releases
         material_exhibit_prefixes = ["2", "4", "10", "99"]
 
-        for document in documents:
-            if not document.document_type or not document.document_type.startswith("EX-"):
-                continue
-
-            exhibit_number = document.document_type.replace("EX-", "")
-
-            # Filter to material exhibits only
+        def material_filter(exhibit_number: str) -> bool:
             prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
-            if prefix not in material_exhibit_prefixes:
-                continue
+            return prefix in material_exhibit_prefixes
 
-            if not document.is_html():
-                continue
-
-            parser = Parser(content=document.content)
-            pages = parser.get_pages()
-
-            if not pages:
-                continue
-
-            attachment_type = self.infer_attachment_type(exhibit_number)
-
-            attachment_response = self.database.table("filing_attachments").upsert({
-                "exhibit_number": exhibit_number,
-                "filename": document.document or f"ex-{exhibit_number}",
-                "description": document.description,
-                "num_pages": len(pages),
-                "type": attachment_type,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            }, on_conflict="filing_id,exhibit_number").execute()
-
-            if not attachment_response.data:
-                continue
-
-            attachment_id = attachment_response.data[0]['id']
-
-            # Upsert attachment pages
-            self.database.table("filing_attachment_pages").upsert([{
-                "page": page['page'],
-                "content": page['content'],
-                "attachment_id": attachment_id,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            } for page in pages], on_conflict="attachment_id,page").execute()
-
-            # Upsert attachment chunks
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
-
-            attachment_data.append({
-                "attachment_id": attachment_id,
-                "exhibit_number": exhibit_number,
-                "pages": pages[:10]
-            })
-
-        return attachment_data
+        return super()._upsert_attachments(filing_id, exhibit_filter=material_filter)
 
     def _build_embedding_header(self, company_data: dict, section_type: str, fiscal_year: int = None, fiscal_period: str = None) -> str:
         """Build a rich contextual header for embedding"""
@@ -195,10 +141,8 @@ class FilingTenK(BaseFiling):
 
     def _upsert_filing_chunks(self, pages: List[dict], filing_id: int, filing_type: Literal['10-K', '10-Q', '20-F']):
         """Chunks the filing pages and upserts them"""
-        # Get company data for header
         company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
 
-        # Get fiscal info
         filing_record = self.database.table("filings").select("fiscal_year,fiscal_period").eq("id", filing_id).execute().data[0]
         fiscal_year = filing_record.get('fiscal_year')
         fiscal_period = filing_record.get('fiscal_period')
@@ -206,7 +150,6 @@ class FilingTenK(BaseFiling):
         extractor = SectionExtractor(pages=pages, filing_type=filing_type)
         sections = extractor.get_sections()
 
-        # Upsert raw section pages
         self._upsert_filing_section_pages(sections, filing_id)
 
         all_chunks = []
@@ -229,10 +172,8 @@ class FilingTenK(BaseFiling):
                 if not section_type:
                     continue
 
-                # Build embedding header
                 header = self._build_embedding_header(company_data, section_type, fiscal_year, fiscal_period)
 
-                # Chunk with header
                 chunks = self.markdown_chunker.split(pages=section['pages'], header=header)
 
                 for i, chunk in enumerate(chunks):
@@ -240,7 +181,7 @@ class FilingTenK(BaseFiling):
                         "index": i,
                         "section": section_type,
                         "page": chunk.page,
-                        "content": chunk.content,
+                        "pages": chunk.pages,
                         "embedding": chunk.embedding_text,  # Uses header + content
                         "has_table": chunk.has_table,
                         "filing_id": filing_id,

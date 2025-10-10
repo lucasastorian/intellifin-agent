@@ -79,8 +79,8 @@ class SearchFilingNotesAction(BaseAction):
         self.log_start("SearchFilingNotes", params=params, thought=args.thought)
 
         forms = self._get_notes_forms_for_reports(args.reports)
-        not_found = self.sync_symbols(symbols=[args.symbol], forms=forms,
-                                       start_date=args.start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(symbols=[args.symbol], forms=forms,
+                                            start_date=args.start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return Message(

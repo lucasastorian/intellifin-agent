@@ -64,7 +64,7 @@ class KeywordSearchFilingsAction(BaseAction):
         self.log_start("KeywordSearchFilings", params)
 
         # Sync company if needed
-        not_found = self.sync_symbols(symbols=[args.symbol])
+        not_found = await self.sync_symbols(symbols=[args.symbol])
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return Message(

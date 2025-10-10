@@ -169,7 +169,7 @@ class FilingTwentyF(BaseFiling):
                     "index": i,
                     "section": section_type,
                     "page": chunk.page,
-                    "content": chunk.content,
+                    "pages": chunk.pages,
                     "embedding": chunk.embedding_text,  # Uses header + content
                     "has_table": chunk.has_table,
                     "filing_id": filing_id,

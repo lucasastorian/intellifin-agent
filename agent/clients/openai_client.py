@@ -24,6 +24,8 @@ class OpenAIClient:
         """Streams a completion with the given messages"""
         items = [item for message in messages for item in message.openai_format()]
 
+        # print(items)
+
         params = {
             "model": self.model,
             "temperature": self.temperature,
@@ -68,10 +70,9 @@ class OpenAIClient:
                     completion.thoughts.append(Thought(id=event.item.id, summaries=[]))
 
                 if event.item.type == 'function_call':
-                    completion.external_id = event.item.id
-
                     self.tool_call_arguments = ""
-                    action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={})
+                    action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={},
+                                    external_id=event.item.id)
                     completion.actions.append(action)
 
                 if event.item.type == 'message':

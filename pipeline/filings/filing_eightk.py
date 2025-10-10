@@ -23,7 +23,6 @@ class FilingEightK(BaseFiling):
         pages = self._upsert_filing_pages(filing_id=filing['id'])
         attachment_data = self._upsert_attachments(filing_id=filing['id'])
 
-        # Run async enrichment in this thread's event loop
         async def enrich():
             enriched_attachments = await self._enrich_attachments(attachment_data, filing)
             await self._enrich_filing(filing, pages, enriched_attachments)
@@ -47,77 +46,18 @@ class FilingEightK(BaseFiling):
 
         return response.data[0]
 
-    def _upsert_attachments(self, filing_id: int) -> List[Dict]:
-        """Upserts ALL attachments (exhibits) for 8-K filings, returns data for enrichment"""
-        documents = self.filing.attachments.documents
-        attachment_data = []
-
-        for document in documents:
-            if not document.document_type or not document.document_type.startswith("EX-"):
-                continue
-
-            exhibit_number = document.document_type.replace("EX-", "")
-
-            if not document.is_html():
-                continue
-
-            parser = Parser(content=document.content)
-            pages = parser.get_pages()
-
-            if not pages:
-                continue
-
-            attachment_type = self.infer_attachment_type(exhibit_number)
-
-            attachment_response = self.database.table("filing_attachments").upsert({
-                "exhibit_number": exhibit_number,
-                "filename": document.document or f"ex-{exhibit_number}",
-                "description": document.description,
-                "num_pages": len(pages),
-                "type": attachment_type,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            }, on_conflict="filing_id,exhibit_number").execute()
-
-            if not attachment_response.data:
-                continue
-
-            attachment_id = attachment_response.data[0]['id']
-
-            self.database.table("filing_attachment_pages").upsert([{
-                "page": page['page'],
-                "content": page['content'],
-                "attachment_id": attachment_id,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            } for page in pages], on_conflict="attachment_id,page").execute()
-
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
-
-            attachment_data.append({
-                "attachment_id": attachment_id,
-                "exhibit_number": exhibit_number,
-                "pages": pages[:10]
-            })
-
-        return attachment_data
-
     async def _enrich_filing(self, filing: dict, pages: List[Dict], enriched_attachments: List[Dict]):
         """Generate LLM summary for the filing using attachment summaries + filing content"""
-        # Build header
         header = self.filing_summarizer.build_header(self.company, filing)
 
-        # Get first 10 pages
         first_pages = pages[:10]
 
-        # Generate filing summary
         result = await self.filing_summarizer.summarize(
             pages=first_pages,
             attachment_summaries=enriched_attachments,
             header=header
         )
 
-        # Update filing with title + summary
         if result and (result.get("title") or result.get("summary")):
             self.database.table("filings").update({
                 "title": result["title"],

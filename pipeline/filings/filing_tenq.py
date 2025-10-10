@@ -53,71 +53,15 @@ class FilingTenQ(BaseFiling):
         return response.data[0]['id']
 
     def _upsert_attachments(self, filing_id: int) -> List[Dict]:
-        """Upserts material attachments (exhibits) for 10-Q filings, returns data for enrichment"""
-        documents = self.filing.attachments.documents
-        attachment_data = []
-
+        """Upserts material attachments (exhibits) for 10-Q filings"""
         # Only pull material exhibits: contracts, M&A, debt instruments, press releases
         material_exhibit_prefixes = ["2", "4", "10", "99"]
 
-        for document in documents:
-            if not document.document_type or not document.document_type.startswith("EX-"):
-                continue
-
-            exhibit_number = document.document_type.replace("EX-", "")
-
-            # Filter to material exhibits only
+        def material_filter(exhibit_number: str) -> bool:
             prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
-            if prefix not in material_exhibit_prefixes:
-                continue
+            return prefix in material_exhibit_prefixes
 
-            if not document.is_html():
-                continue
-
-            parser = Parser(content=document.content)
-            pages = parser.get_pages()
-
-            if not pages:
-                continue
-
-            # Infer attachment type from exhibit number
-            attachment_type = self.infer_attachment_type(exhibit_number)
-
-            # Upsert attachment metadata
-            attachment_response = self.database.table("filing_attachments").upsert({
-                "exhibit_number": exhibit_number,
-                "filename": document.document or f"ex-{exhibit_number}",
-                "description": document.description,
-                "num_pages": len(pages),
-                "type": attachment_type,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            }, on_conflict="filing_id,exhibit_number").execute()
-
-            if not attachment_response.data:
-                continue
-
-            attachment_id = attachment_response.data[0]['id']
-
-            # Upsert attachment pages
-            self.database.table("filing_attachment_pages").upsert([{
-                "page": page['page'],
-                "content": page['content'],
-                "attachment_id": attachment_id,
-                "filing_id": filing_id,
-                "company_id": self.company_id
-            } for page in pages], on_conflict="attachment_id,page").execute()
-
-            # Upsert attachment chunks
-            self._upsert_filing_attachment_chunks(pages=pages, attachment_id=attachment_id, filing_id=filing_id)
-
-            attachment_data.append({
-                "attachment_id": attachment_id,
-                "exhibit_number": exhibit_number,
-                "pages": pages[:10]
-            })
-
-        return attachment_data
+        return super()._upsert_attachments(filing_id, exhibit_filter=material_filter)
 
     def _build_embedding_header(self, company_data: dict, section_type: str, fiscal_year: int = None, fiscal_period: str = None) -> str:
         """Build a rich contextual header for embedding"""
@@ -251,7 +195,7 @@ class FilingTenQ(BaseFiling):
                         "index": i,
                         "section": section_type,
                         "page": chunk.page,
-                        "content": chunk.content,
+                        "pages": chunk.pages,
                         "embedding": chunk.embedding_text,  # Uses header + content
                         "has_table": chunk.has_table,
                         "filing_id": filing_id,

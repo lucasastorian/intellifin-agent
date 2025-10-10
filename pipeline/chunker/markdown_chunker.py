@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 class MarkdownChunker:
     """Splits markdown content into chunks"""
 
-    def __init__(self, chunk_size: int = 768, chunk_overlap: int = 128):
+    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 128):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def split(self, pages: List[Dict[str, Union[int, str]]], header: str = None):
+    def split(self, pages: List[Dict[str, Union[int, str]]], header: str = None) -> List[MarkdownChunk]:
         """Split the pages into chunks with optional header for embedding context"""
         blocks = self._split_into_blocks(pages=pages)
         return self._chunk_blocks(blocks=blocks, header=header)
@@ -71,7 +71,7 @@ class MarkdownChunker:
             return True
         return True
 
-    def _chunk_blocks(self, blocks: List[BaseBlock], header: str = None):
+    def _chunk_blocks(self, blocks: List[BaseBlock], header: str = None) -> List[MarkdownChunk]:
         """Converts the blocks to chunks"""
         chunks = []
         chunk_blocks = []

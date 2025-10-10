@@ -80,8 +80,8 @@ class SearchAttachmentsAction(BaseAction):
         params = f"'{args.query}' in {symbols_str} attachments ({forms_str}), {args.start_date} → {args.end_date}"
         self.log_start("SearchAttachments", params=params, thought=args.thought)
 
-        not_found = self.sync_symbols(symbols=args.symbols, forms=args.forms,
-                                       start_date=args.start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(symbols=args.symbols, forms=args.forms,
+                                            start_date=args.start_date, end_date=args.end_date)
         if not_found:
             self.log_error(f"Symbols not found: {', '.join(not_found)}")
             return Message(

@@ -131,10 +131,8 @@ class BaseFiling(ABC):
 
         note_ids = [note['id'] for note in response.data]
 
-        # Chunk each note
         self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
 
-        # Generate previews for notes
         note_data = [(note_id, processed_note['title'], processed_note['content'])
                      for note_id, processed_note in zip(note_ids, processed_notes)]
         asyncio.run(self._enrich_note_previews(note_data))
@@ -190,19 +188,15 @@ class BaseFiling(ABC):
 
     def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
         """Chunks filing notes and upserts them"""
-        # Get company data for header
         company_data = self.database.table("companies").select("*").eq("id", self.company_id).execute().data[0]
 
-        # Get filing data for header
         filing_data = self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute().data[0]
 
         all_chunks = []
 
         for note_id, note_data in zip(note_ids, processed_notes):
-            # Build embedding header
             header = self._build_note_embedding_header(company_data, filing_data, note_data['title'])
 
-            # Chunk the note content with header
             chunks = self.markdown_chunker.split(pages=[{"page": 0, "content": note_data['content']}], header=header)
 
             for i, chunk in enumerate(chunks):
@@ -274,15 +268,130 @@ class BaseFiling(ABC):
             "num_attachments": num_attachments
         }).eq("id", filing_id).execute()
 
-    def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int):
-        """Chunks attachment pages and upserts them"""
-        chunks = self.markdown_chunker.split(pages=pages)
+    def _upsert_attachments(self, filing_id: int, exhibit_filter=None) -> List[Dict]:
+        """
+        Upserts attachments (exhibits) for filings, returns data for enrichment.
+
+        Args:
+            filing_id: The filing ID
+            exhibit_filter: Optional function(exhibit_number) -> bool to filter which exhibits to process
+        """
+        documents = self.filing.attachments.documents
+        attachment_data = []
+
+        for document in documents:
+            if not document.document_type or not document.document_type.startswith("EX-"):
+                continue
+
+            exhibit_number = document.document_type.replace("EX-", "")
+
+            # Apply custom filter if provided
+            if exhibit_filter and not exhibit_filter(exhibit_number):
+                continue
+
+            if not document.is_html():
+                continue
+
+            parser = Parser(content=document.content)
+            pages = parser.get_pages()
+
+            if not pages:
+                continue
+
+            attachment_type = self.infer_attachment_type(exhibit_number)
+
+            attachment_response = self.database.table("filing_attachments").upsert({
+                "exhibit_number": exhibit_number,
+                "filename": document.document or f"ex-{exhibit_number}",
+                "description": document.description,
+                "num_pages": len(pages),
+                "type": attachment_type,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            }, on_conflict="filing_id,exhibit_number").execute()
+
+            if not attachment_response.data:
+                continue
+
+            attachment_id = attachment_response.data[0]['id']
+
+            # Upsert attachment pages
+            self.database.table("filing_attachment_pages").upsert([{
+                "page": page['page'],
+                "content": page['content'],
+                "attachment_id": attachment_id,
+                "filing_id": filing_id,
+                "company_id": self.company_id
+            } for page in pages], on_conflict="attachment_id,page").execute()
+
+            # Only chunk press releases (99 exhibits) for vector search
+            if attachment_type == "press_release":
+                self._upsert_filing_attachment_chunks(
+                    pages=pages,
+                    attachment_id=attachment_id,
+                    filing_id=filing_id,
+                    attachment_type=attachment_type,
+                    exhibit_number=exhibit_number,
+                    description=document.description
+                )
+
+            attachment_data.append({
+                "attachment_id": attachment_id,
+                "exhibit_number": exhibit_number,
+                "pages": pages[:10]
+            })
+
+        return attachment_data
+
+    def _build_attachment_embedding_header(self, attachment_type: str, exhibit_number: str, description: str = None) -> str:
+        """Build a rich contextual header for attachment embedding"""
+        parts = []
+
+        # Company header
+        name = self.company.get('name')
+        symbols = self.company.get('symbols', [])
+        exchanges = self.company.get('exchanges', [])
+        ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
+
+        if name:
+            parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
+
+        # Sector/Industry
+        sector = self.company.get('sector')
+        industry = self.company.get('industry')
+        if sector or industry:
+            sector_str = f"Sector: {sector}" if sector else ""
+            industry_str = f"Industry: {industry}" if industry else ""
+            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
+
+        # Filing metadata
+        filing_parts = [f"Form {self.filing.form}"]
+        filing_parts.append(f"Filed: {self.filing_date}")
+        if self.report_date:
+            filing_parts.append(f"Report Date: {self.report_date}")
+        parts.append(" | ".join(filing_parts))
+
+        # Attachment info
+        attachment_display = attachment_type.replace('_', ' ').title()
+        attachment_parts = [f"Exhibit {exhibit_number}", attachment_display]
+        if description:
+            attachment_parts.append(description)
+        parts.append(f"\n## {' - '.join(attachment_parts)}\n")
+
+        return "\n".join(parts)
+
+    def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int,
+                                         attachment_type: str, exhibit_number: str, description: str = None):
+        """Chunks attachment pages and upserts them with embedding context"""
+        header = self._build_attachment_embedding_header(attachment_type, exhibit_number, description)
+        chunks = self.markdown_chunker.split(pages=pages, header=header)
 
         data = [
             {
                 "index": i,
                 "page": chunk.page,
-                "content": chunk.content,
+                "pages": chunk.pages,
+                "embedding": chunk.embedding_text,
                 "has_table": chunk.has_table,
                 "attachment_id": attachment_id,
                 "filing_id": filing_id,
