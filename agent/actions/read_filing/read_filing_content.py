@@ -202,7 +202,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
         att_result = (
             self.database
             .table("company_filing_attachments")
-            .select("exhibit_number,title,type,company_name,company_symbols,form,filing_date")
+            .select("exhibit_number,title,attachment_type,company_name,company_symbols,form,filing_date")
             .eq("id", attachment_id)
             .limit(1)
             .execute()

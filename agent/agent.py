@@ -110,7 +110,7 @@ class Agent:
         """Calls the relevant actions and returns whether to terminate"""
         follow_ups = []
 
-        if completion.actions is None:
+        if not completion.actions:
             return None
 
         for called_action in completion.actions:
