@@ -129,7 +129,6 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
 
         self.log_done(f"Retrieved {args.document} content")
 
-        # Create message with ID for curation to reference
         read_message_id = str(uuid.uuid4())
         read_message = Message(
             id=read_message_id,
@@ -139,7 +138,6 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
             action_id=action.id
         )
 
-        # Create curation action
         from agent.actions.read_filing.curate_filing_content import CurateFilingContentAction
 
         curate_action = CurateFilingContentAction(

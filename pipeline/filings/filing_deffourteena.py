@@ -14,6 +14,7 @@ class FilingDefFourteenA(BaseFiling):
 
         # DEF 14A filings are not chunked
         await self._update_filing_counts(filing_id=filing_id)
+        await self._mark_synced()
 
     async def _upsert_filing(self, xbrl: XBRL) -> int:
         """Creates a filing record"""

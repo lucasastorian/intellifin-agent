@@ -10,10 +10,10 @@ from pipeline.enrichment.filing_summarizer import FilingSummarizer
 
 class FilingEightK(BaseFiling):
 
-    def __init__(self, *args, openai_client=None, **kwargs):
-        super().__init__(*args, openai_client=openai_client, **kwargs)
-        client = openai_client if openai_client else OpenAIClient()
-        self.filing_summarizer = FilingSummarizer(client)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.openai_client = OpenAIClient()
+        self.filing_summarizer = FilingSummarizer(self.openai_client)
 
     async def upsert(self):
         """Upserts the 8-K filing"""
@@ -26,6 +26,7 @@ class FilingEightK(BaseFiling):
         enriched_attachments = await self._enrich_attachments(attachment_data, filing)
         await self._enrich_filing(filing, pages, enriched_attachments)
         await self._update_filing_counts(filing_id=filing['id'])
+        await self._mark_synced()
 
     async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""

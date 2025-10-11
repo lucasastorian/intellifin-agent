@@ -171,12 +171,13 @@ class SearchPressReleasesAction(BaseAction):
             depth_map = {'low': 5, 'medium': 15, 'high': 30}
             limit = depth_map[args.depth]
 
-            result = await query.vector_search(
+            await query.vector_search(
                 query=args.excerpt_description,
                 column="embedding",
                 topk=limit,
                 return_scores=True
-            ).execute()
+            )
+            result = await query.execute()
 
             print(f"Vector search returned {limit} results")
 

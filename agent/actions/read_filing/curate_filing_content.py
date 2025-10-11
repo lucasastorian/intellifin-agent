@@ -120,7 +120,6 @@ Choose 'keep' when you need the full details. Choose 'summarize' for high-level 
 
         self.log_done(summary_msg)
 
-        # Build response with context refinement if needed
         response = ActionResponse(
             message=Message(
                 role="tool",
@@ -134,7 +133,6 @@ Choose 'keep' when you need the full details. Choose 'summarize' for high-level 
             )
         )
 
-        # Apply context refinement only if we're changing content
         if refined_content is not None:
             response.context_refinement = ContextRefinement(
                 message_id=self.read_message_id,

@@ -1,4 +1,5 @@
 """INSERT query builder."""
+import asyncio
 import numpy as np
 from typing import Dict, List, Union, Any
 from ..ir import InsertIR
@@ -36,24 +37,32 @@ class InsertBuilder:
         total_params = num_cols * len(serialized_rows)
         use_executemany = total_params > max_vars
 
-        all_results = []
-        with self.db.transaction():
-            if use_executemany:
-                sql = f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) VALUES ({', '.join(['?'] * num_cols)})"
-                param_rows = [[row[c] for c in cols] for row in serialized_rows]
-                self.db.conn.executemany(sql, param_rows)
-                return Result([], count=len(serialized_rows))
-            else:
-                batch_size = max(1, max_vars // num_cols)
-                for i in range(0, len(serialized_rows), batch_size):
-                    batch = serialized_rows[i:i + batch_size]
-                    ir = InsertIR(table=self.table, rows=batch)
-                    sql, params = generate_insert(ir, self.dialect)
-                    rows = self.db._exec(sql, params)
+        def _exec_insert():
+            all_results = []
+            with self.db.transaction():
+                if use_executemany:
+                    sql = f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) VALUES ({', '.join(['?'] * num_cols)})"
+                    param_rows = [[row[c] for c in cols] for row in serialized_rows]
+                    self.db.conn.executemany(sql, param_rows)
+                    return None  # Signal executemany was used
+                else:
+                    batch_size = max(1, max_vars // num_cols)
+                    for i in range(0, len(serialized_rows), batch_size):
+                        batch = serialized_rows[i:i + batch_size]
+                        ir = InsertIR(table=self.table, rows=batch)
+                        sql, params = generate_insert(ir, self.dialect)
+                        rows = self.db._exec(sql, params)
 
-                    for row in rows:
-                        row = self.db._deserialize_json_fields(self.table, row)
-                        all_results.append(row)
+                        for row in rows:
+                            row = self.db._deserialize_json_fields(self.table, row)
+                            all_results.append(row)
+            return all_results
+
+        all_results = await asyncio.to_thread(_exec_insert)
+
+        if all_results is None:
+            # executemany was used, no rows returned
+            return Result([], count=len(serialized_rows))
 
         # Embed and store vectors AFTER SQLite insert, BEFORE return
         await self._embed_vectors(all_results)

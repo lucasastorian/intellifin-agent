@@ -174,7 +174,7 @@ class SearchCurrentReportsAction(BaseAction):
             depth_map = {'low': 5, 'medium': 10, 'high': 20}
             limit = depth_map[args.depth]
 
-            result = await (
+            query = (
                 self.database
                 .table("company_filings")
                 .select(
@@ -185,14 +185,14 @@ class SearchCurrentReportsAction(BaseAction):
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
-                .vector_search(
-                    args.query_description,
-                    "summary",
-                    topk=limit,
-                    return_scores=True
-                )
-                .execute()
             )
+            await query.vector_search(
+                args.query_description,
+                "summary",
+                topk=limit,
+                return_scores=True
+            )
+            result = await query.execute()
 
             return result.data
 

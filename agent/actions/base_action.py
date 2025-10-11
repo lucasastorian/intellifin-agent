@@ -53,7 +53,7 @@ class BaseAction(ABC):
                     parts.append(f"({date_range})")
                 sync_desc += f" [{' '.join(parts)}]"
 
-            synced_count = await company.sync(forms=forms, start_date=start_date, end_date=end_date)
+            synced_count = await company.upsert(forms=forms, start_date=start_date, end_date=end_date)
 
             # Only show sync message if filings were actually synced
             if synced_count > 0:

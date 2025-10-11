@@ -9,11 +9,10 @@ from pipeline.enrichment.filing_summarizer import FilingSummarizer
 
 class FilingSixK(BaseFiling):
 
-    def __init__(self, *args, openai_client=None, **kwargs):
-        super().__init__(*args, openai_client=openai_client, **kwargs)
-        # Use same client as parent
-        client = openai_client if openai_client else OpenAIClient()
-        self.filing_summarizer = FilingSummarizer(client)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.openai_client = OpenAIClient()
+        self.filing_summarizer = FilingSummarizer(self.openai_client)
 
     async def upsert(self):
         """Upserts the 6-K filing"""
@@ -21,17 +20,9 @@ class FilingSixK(BaseFiling):
 
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
-
-        # Run async enrichment
-        try:
-            await self._enrich_filing(filing, pages)
-        except Exception as e:
-            print(f"ERROR enriching 6-K {self.accession_number}: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Update filing counts after all processing is complete
+        await self._enrich_filing(filing, pages)
         await self._update_filing_counts(filing_id=filing['id'])
+        await self._mark_synced()
 
     async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""

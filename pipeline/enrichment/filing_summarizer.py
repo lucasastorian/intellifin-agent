@@ -54,7 +54,6 @@ Guidelines:
             system_prompt=self.SYSTEM_PROMPT,
             user_message=user_message,
             response_model=FilingSummary,
-            reasoning_effort="low"
         )
 
         return {"title": result.title, "summary": result.summary}

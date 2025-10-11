@@ -1,4 +1,5 @@
 """DELETE query builder."""
+import asyncio
 from typing import List, Dict, Any
 from .mixins import PredMixin
 from ..ir import DeleteIR
@@ -21,15 +22,19 @@ class DeleteBuilder(PredMixin):
         if self.table in schema.views:
             raise ValueError(f"Cannot DELETE from view '{table}'.")
 
-    def execute(self):
+    async def execute(self):
         """Execute the DELETE query."""
         ir = DeleteIR(table=self.table, where=self._pred)
         bound = bind_delete(ir, self.schema)
         sql, params = generate_delete(bound, self.dialect)
 
-        with self.db._lock:
-            rows = self.db._exec_unsafe(sql, params)
-            self.db.conn.commit()
+        def _exec_delete():
+            with self.db._lock:
+                rows = self.db._exec_unsafe(sql, params)
+                self.db.conn.commit()
+                return rows
+
+        rows = await asyncio.to_thread(_exec_delete)
 
         # Tombstone vectors AFTER delete, BEFORE return
         self._tombstone_vectors(rows)

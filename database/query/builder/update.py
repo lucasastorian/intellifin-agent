@@ -1,4 +1,5 @@
 """UPDATE query builder."""
+import asyncio
 import numpy as np
 from typing import Dict, Any, List
 from .mixins import PredMixin
@@ -33,9 +34,13 @@ class UpdateBuilder(PredMixin):
         bound = bind_update(ir, self.schema)
         sql, params = generate_update(bound, self.dialect)
 
-        with self.db._lock:
-            rows = self.db._exec_unsafe(sql, params)
-            self.db.conn.commit()
+        def _exec_update():
+            with self.db._lock:
+                rows = self.db._exec_unsafe(sql, params)
+                self.db.conn.commit()
+                return rows
+
+        rows = await asyncio.to_thread(_exec_update)
 
         processed = []
         for row in rows:

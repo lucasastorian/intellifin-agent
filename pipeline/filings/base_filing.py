@@ -12,11 +12,13 @@ from pipeline.parsers.financial_statement import FinancialStatements
 from pipeline.enrichment.openai_client import OpenAIClient
 from pipeline.enrichment.attachment_summarizer import AttachmentSummarizer
 from pipeline.enrichment.note_preview_generator import NotePreviewGenerator
+from pipeline.enrichment.note_embedding_generator import NoteEmbeddingGenerator
+from pipeline.enrichment.attachment_embedding_generator import AttachmentEmbeddingGenerator
 
 
 class BaseFiling(ABC):
 
-    def __init__(self, filing: EntityFiling, company: dict, database: Database, openai_client: Optional[OpenAIClient] = None):
+    def __init__(self, filing: EntityFiling, company: dict, database: Database):
         self.filing = filing
         self.company = company
         self.company_id = company['id']
@@ -28,10 +30,10 @@ class BaseFiling(ABC):
 
         self.markdown_chunker = MarkdownChunker()
 
-        # Use provided client or create new one
-        client = openai_client if openai_client else OpenAIClient()
-        self.attachment_summarizer = AttachmentSummarizer(client)
-        self.note_preview_generator = NotePreviewGenerator(client)
+        # Each subclass that needs OpenAI should instantiate its own client
+        openai_client = OpenAIClient()
+        self.attachment_summarizer = AttachmentSummarizer(openai_client)
+        self.note_preview_generator = NotePreviewGenerator(openai_client)
 
     @abstractmethod
     async def upsert(self):
@@ -40,13 +42,13 @@ class BaseFiling(ABC):
 
     async def _load_xbrl(self) -> XBRL:
         """Load XBRL using async SGML loading (caches result)"""
-        sgml = await self.filing.sgml_async()
-        return sgml.xbrl
+        await self.filing.sgml_async()  # Cache SGML
+        return self.filing.xbrl()  # Use cached SGML
 
     async def _load_html(self) -> str:
         """Load HTML using async SGML loading (caches result)"""
-        sgml = await self.filing.sgml_async()
-        return sgml.html()
+        await self.filing.sgml_async()  # Cache SGML
+        return self.filing.html()
 
     @staticmethod
     def infer_attachment_type(exhibit_number: str) -> str:
@@ -94,10 +96,15 @@ class BaseFiling(ABC):
         else:
             return "other"
 
-    def exists(self):
+    async def exists(self):
         """Returns True if an entry for the filing exists in the DB"""
-        return len(
-            self.database.table("filings").select("*").eq("accession_number", self.accession_number).execute()) > 0
+        result = await self.database.table("filings").select("*").eq("accession_number",
+                                                                     self.accession_number).execute()
+        return len(result.data) > 0
+
+    async def _mark_synced(self):
+        """Mark this filing as synced in the database"""
+        await self.database.table("filings").update({"synced": True}).eq("accession_number", self.accession_number).execute()
 
     @abstractmethod
     def _upsert_filing(self, xbrl: XBRL):
@@ -120,7 +127,7 @@ class BaseFiling(ABC):
 
         return pages
 
-    async def _upsert_filing_notes(self, filing_id: int):
+    async def _upsert_filing_notes(self, filing_id: int, filing: dict):
         """Upserts all the notes associated with the filing and their chunks"""
         if not self.filing.reports:
             return None
@@ -137,76 +144,29 @@ class BaseFiling(ABC):
                                     "company_id": self.company_id})
 
         response = await self.database.table("filing_notes").upsert(processed_notes,
-                                                              on_conflict="filing_id,filename").execute()
+                                                                    on_conflict="filing_id,filename").execute()
 
         note_ids = [note['id'] for note in response.data]
 
         await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing_id=filing_id)
 
-        # Pass note IDs for enrichment
-        await self._enrich_note_previews(note_ids)
+        await self._enrich_note_previews(note_ids, filing)
 
         return note_ids
 
-    def _build_note_embedding_header(self, company_data: dict, filing_data: dict, note_title: str) -> str:
-        """Build a rich contextual header for filing note embedding"""
-        parts = []
-
-        # Company header
-        name = company_data.get('name')
-        symbols = company_data.get('symbols', [])
-        exchanges = company_data.get('exchanges', [])
-        ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
-
-        if name:
-            parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
-
-        # Sector/Industry
-        sector = company_data.get('sector')
-        industry = company_data.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
-
-        # Filing metadata
-        form = filing_data.get('form')
-        fiscal_year = filing_data.get('fiscal_year')
-        fiscal_period = filing_data.get('fiscal_period')
-        filing_date = filing_data.get('filing_date')
-        report_date = filing_data.get('report_date')
-
-        if form:
-            filing_parts = [f"Form {form}"]
-            if fiscal_year:
-                period_str = f"FY {fiscal_year}"
-                if fiscal_period and fiscal_period != 'FY':
-                    period_str += f" {fiscal_period}"
-                filing_parts.append(period_str)
-            if filing_date:
-                filing_parts.append(f"Filed: {filing_date}")
-            if report_date:
-                filing_parts.append(f"Period Ending: {report_date}")
-            parts.append(" | ".join(filing_parts))
-
-        # Note title
-        if note_title:
-            parts.append(f"\n## Note: {note_title}\n")
-
-        return "\n".join(parts)
-
     async def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing_id: int):
         """Chunks filing notes and upserts them"""
-        company_data = (await self.database.table("companies").select("*").eq("id", self.company_id).execute()).data[0]
+        filing_data = (
+            await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq(
+                "id", filing_id).execute()).data[0]
 
-        filing_data = (await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute()).data[0]
+        # Create embedding generator with company and filing context
+        generator = NoteEmbeddingGenerator(self.company, filing_data)
 
         all_chunks = []
 
         for note_id, note_data in zip(note_ids, processed_notes):
-            header = self._build_note_embedding_header(company_data, filing_data, note_data['title'])
-
-            chunks = self.markdown_chunker.split(pages=[{"page": 0, "content": note_data['content']}], header=header)
+            chunks = await generator.embed(note_data['title'], note_data['content'])
 
             for i, chunk in enumerate(chunks):
                 all_chunks.append({
@@ -225,7 +185,7 @@ class BaseFiling(ABC):
                 on_conflict="filing_note_id,index"
             ).execute()
 
-    def _upsert_financial_statements(self, xbrl: Optional[XBRL], filing_id: int):
+    async def _upsert_financial_statements(self, xbrl: Optional[XBRL], filing_id: int):
         """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
         if xbrl is None:
             return
@@ -350,45 +310,18 @@ class BaseFiling(ABC):
 
         return attachment_data
 
-    def _build_attachment_embedding_header(self, attachment_type: str, exhibit_number: str, description: str = None) -> str:
-        """Build a rich contextual header for attachment embedding"""
-        parts = []
-
-        # Company header
-        name = self.company.get('name')
-        symbols = self.company.get('symbols', [])
-        exchanges = self.company.get('exchanges', [])
-        ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
-
-        if name:
-            parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
-
-        sector = self.company.get('sector')
-        industry = self.company.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
-
-        filing_parts = [f"Form {self.filing.form}"]
-        filing_parts.append(f"Filed: {self.filing_date}")
-        if self.report_date:
-            filing_parts.append(f"Report Date: {self.report_date}")
-        parts.append(" | ".join(filing_parts))
-
-        attachment_display = attachment_type.replace('_', ' ').title()
-        attachment_parts = [f"Exhibit {exhibit_number}", attachment_display]
-        if description:
-            attachment_parts.append(description)
-        parts.append(f"\n## {' - '.join(attachment_parts)}\n")
-
-        return "\n".join(parts)
-
     async def _upsert_filing_attachment_chunks(self, pages: List[dict], attachment_id: int, filing_id: int,
-                                         attachment_type: str, exhibit_number: str, description: str = None):
+                                               attachment_type: str, exhibit_number: str, description: str = None):
         """Chunks attachment pages and upserts them with embedding context"""
-        header = self._build_attachment_embedding_header(attachment_type, exhibit_number, description)
-        chunks = self.markdown_chunker.split(pages=pages, header=header)
+        filing_data = {
+            "form": self.filing.form,
+            "filing_date": self.filing_date,
+            "report_date": self.report_date
+        }
+
+        # Create embedding generator with company and filing context
+        generator = AttachmentEmbeddingGenerator(self.company, filing_data)
+        chunks = await generator.embed(pages, attachment_type, exhibit_number, description)
 
         data = [
             {
@@ -413,6 +346,7 @@ class BaseFiling(ABC):
         if not attachment_data:
             return []
 
+        # print(f"  INFO: Starting enrichment for {len(attachment_data)} attachments in parallel...")
         header = self.attachment_summarizer.build_header(self.company, filing)
 
         tasks = [
@@ -420,15 +354,11 @@ class BaseFiling(ABC):
             for att in attachment_data
         ]
 
-        # Add 30 second timeout per attachment
-        try:
-            summaries = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=30.0 * len(tasks)
-            )
-        except asyncio.TimeoutError:
-            print(f"WARNING: Attachment enrichment timed out after {30 * len(tasks)}s")
-            summaries = [Exception("Timeout") for _ in tasks]
+        # 30s timeout for parallel execution (httpx has 15s read timeout per call)
+        summaries = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=30.0
+        )
 
         updates = []
         enriched = []
@@ -463,31 +393,35 @@ class BaseFiling(ABC):
 
         return enriched
 
-    async def _enrich_note_previews(self, note_ids: List[int]):
+    async def _enrich_note_previews(self, note_ids: List[int], filing: dict):
         """Generate one-sentence previews for all notes in parallel
 
         Args:
             note_ids: List of note IDs to enrich
+            filing: Filing dict with metadata
         """
         if not note_ids:
             return
 
+        # print(f"  INFO: Starting note preview enrichment for {len(note_ids)} notes in parallel...")
+
+        # Use self.company and filing dict directly (no DB fetch needed!)
         # Fetch note titles and content for preview generation
-        notes = self.database.table("filing_notes").select("id,title,content").in_("id", note_ids).execute()
+        notes = await self.database.table("filing_notes").select("id,title,content").in_("id", note_ids).execute()
 
         tasks = [
-            self.note_preview_generator.generate(note['title'], note['content'])
+            self.note_preview_generator.generate(note['title'], note['content'], self.company, filing)
             for note in notes.data
         ]
 
-        # Add 15 second timeout per note
+        # 30s timeout for parallel execution
         try:
             previews = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=15.0 * len(tasks)
+                timeout=30.0
             )
         except asyncio.TimeoutError:
-            print(f"WARNING: Note preview enrichment timed out after {15 * len(tasks)}s")
+            print(f"WARNING: Note preview enrichment timed out after 30s")
             previews = [Exception("Timeout") for _ in tasks]
 
         updates = []

@@ -44,7 +44,7 @@ class LLMCache:
             system_prompt,
             user_message,
             schema_str,
-            reasoning_effort
+            reasoning_effort or "none"
         ]
         key_string = "\n---\n".join(key_parts)
 

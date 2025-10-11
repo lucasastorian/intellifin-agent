@@ -4,13 +4,13 @@ from openai import AsyncStream
 from typing import Literal, List
 
 from agent.actions import BaseAction
-from agent.message import Message, Action, Thought
+from agent.message import Message, Action, Thought, WebSearch
 
 
 class OpenAIClient:
 
     def __init__(self, model: str = "gpt-5", temperature: float = 1.0,
-                 reasoning_effort: Literal['low', 'medium', 'high', 'none'] = 'medium'):
+                 reasoning_effort: Literal['minimal', 'low', 'medium', 'high'] = 'medium'):
         self.model = model
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
@@ -20,21 +20,21 @@ class OpenAIClient:
         self.tool_call_arguments = ""
 
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
-                     allowed_actions: List[BaseAction] = None):
+                     allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
         """Streams a completion with the given messages"""
         items = [item for message in messages for item in message.openai_format()]
 
-        # print(items)
-
         params = {
             "model": self.model,
-            "temperature": self.temperature,
             "instructions": system_prompt,
             "input": items,
             "reasoning": {"effort": self.reasoning_effort, "summary": "auto"},
             "tools": [action.openai_schema for action in actions],
             "stream": True
         }
+
+        if enable_web_search:
+            params['tools'].append({"type": "web_search"})
 
         if allowed_actions and len(allowed_actions) == 1:
             params['tool_choice'] = {"type": "function", "name": allowed_actions[0].name}
@@ -67,16 +67,21 @@ class OpenAIClient:
             elif event.type == 'response.output_item.added':
 
                 if event.item.type == 'reasoning':
-                    completion.thoughts.append(Thought(id=event.item.id, summaries=[]))
+                    completion.thoughts.append(Thought(id=event.item.id, summaries=[], index=event.output_index))
 
-                if event.item.type == 'function_call':
+                elif event.item.type == 'function_call':
                     self.tool_call_arguments = ""
                     action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={},
-                                    external_id=event.item.id)
+                                    external_id=event.item.id, index=event.output_index)
                     completion.actions.append(action)
 
-                if event.item.type == 'message':
+                elif event.item.type == 'message':
                     completion.external_id = event.item.id
+                    completion.content_index = event.output_index
+
+                elif event.item.type == 'web_search_call':
+                    web_search = WebSearch(id=event.item.id, query="", index=event.output_index)
+                    completion.web_searches.append(web_search)
 
             elif event.type == 'response.reasoning_summary_part.added':
                 completion.thoughts[-1].summaries.append("")
@@ -116,7 +121,9 @@ class OpenAIClient:
                 pass
 
             elif event.type == 'response.output_item.done':
-                pass
+
+                if event.item.type == 'web_search_call':
+                    completion.web_searches[-1].query = event.item.action.query
 
             elif event.type == 'response.completed':
                 usage = event.response.usage

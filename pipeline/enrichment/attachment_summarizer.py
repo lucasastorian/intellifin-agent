@@ -6,18 +6,7 @@ from pipeline.enrichment.models import AttachmentSummary
 class AttachmentSummarizer:
     """Handles LLM-based summarization of filing attachments"""
 
-    SYSTEM_PROMPT = """You are an expert financial analyst summarizing SEC filing attachments.
-
-Generate a concise title and summary for the document provided.
-
-Guidelines:
-- Title: Concise and descriptive (e.g., "Series D Preferred Stock Purchase Agreement", "Q4 2024 Earnings Press Release")
-- Summary: 2-3 sentences covering:
-  1. Document type and parties involved
-  2. Key transaction details (amounts, dates, material terms)
-  3. Business purpose or rationale
-- Be specific with numbers, dates, and entity names
-- Focus on material information that investors care about"""
+    SYSTEM_PROMPT = """Generate a concise title and 2-3 sentence summary. Include: document type, parties, key details (amounts, dates, terms), and purpose."""
 
     def __init__(self, client: BaseLLMClient):
         self.client = client
@@ -33,14 +22,17 @@ Guidelines:
         Returns:
             Dict with 'title' and 'summary' keys
         """
-        page_contents = "\n\n---\n\n".join([f"Page {p['page']}\n\n {p['content']}" for p in pages])
-        user_message = f"{header}\n\n{page_contents}"
+        page_contents = "\n---\n".join([p['content'] for p in pages])
+        user_message = f"{header}\n{page_contents}"
+
+        # Limit to 5k chars
+        if len(user_message) > 5000:
+            user_message = user_message[:5000]
 
         result = await self.client.parse(
             system_prompt=self.SYSTEM_PROMPT,
             user_message=user_message,
-            response_model=AttachmentSummary,
-            reasoning_effort="none"
+            response_model=AttachmentSummary
         )
 
         return {"title": result.title, "summary": result.summary}

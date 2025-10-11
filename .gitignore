@@ -8,6 +8,9 @@ venv/
 
 .env
 
+intellifin.db
+intellifin.db-shm
+intellifin.db-wal
 .local.db
 .local.db-shm
 .local.db-wal

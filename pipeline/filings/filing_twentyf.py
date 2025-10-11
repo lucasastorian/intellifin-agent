@@ -4,6 +4,7 @@ from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
 from pipeline.parsers.section_extractor import SectionExtractor
+from pipeline.enrichment.section_embedding_generator import SectionEmbeddingGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +19,13 @@ class FilingTwentyF(BaseFiling):
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         filing_id = await self._upsert_filing(xbrl=xbrl)
+        filing = (await self.database.table("filings").select("*").eq("id", filing_id).execute()).data[0]
         pages = await self._upsert_filing_pages(filing_id=filing_id)
-        await self._upsert_filing_notes(filing_id=filing_id)
-        self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
-
+        await self._upsert_filing_notes(filing_id=filing_id, filing=filing)
+        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
         await self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
-
-        # Update filing counts after all processing is complete
         await self._update_filing_counts(filing_id=filing_id)
+        await self._mark_synced()
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
         """Creates a filing record"""
@@ -44,45 +44,6 @@ class FilingTwentyF(BaseFiling):
         }, on_conflict="accession_number").execute()
 
         return response.data[0]['id']
-
-    def _build_embedding_header(self, company_data: dict, section_type: str, fiscal_year: int = None, fiscal_period: str = None) -> str:
-        """Build a rich contextual header for embedding"""
-        parts = []
-
-        # Company header
-        name = company_data.get('name')
-        symbols = company_data.get('symbols', [])
-        exchanges = company_data.get('exchanges', [])
-        ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
-
-        if name:
-            parts.append(f"# {name}{f' ({ticker})' if ticker else ''}")
-
-        # Sector/Industry
-        sector = company_data.get('sector')
-        industry = company_data.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
-
-        # Filing metadata
-        filing_parts = [f"Form {self.filing.form}"]
-        if fiscal_year:
-            period_str = f"FY {fiscal_year}"
-            if fiscal_period and fiscal_period != 'FY':
-                period_str += f" {fiscal_period}"
-            filing_parts.append(period_str)
-        filing_parts.append(f"Filed: {self.filing_date}")
-        if self.report_date:
-            filing_parts.append(f"Period Ending: {self.report_date}")
-        parts.append(" | ".join(filing_parts))
-
-        # Section
-        section_name = section_type.replace('_', ' ').title()
-        parts.append(f"\n## {section_name}\n")
-
-        return "\n".join(parts)
 
     async def _upsert_filing_section_pages(self, sections: List[dict], filing_id: int):
         """Upserts raw section pages before chunking"""
@@ -124,19 +85,18 @@ class FilingTwentyF(BaseFiling):
 
     async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
         """Chunks the filing pages and upserts them"""
-        # Get company data for header
-        company_data = (await self.database.table("companies").select("*").eq("id", self.company_id).execute()).data[0]
-
-        # Get fiscal info
-        filing_record = (await self.database.table("filings").select("fiscal_year,fiscal_period").eq("id", filing_id).execute()).data[0]
+        filing_record = (await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute()).data[0]
         fiscal_year = filing_record.get('fiscal_year')
         fiscal_period = filing_record.get('fiscal_period')
+
+        # Create embedding generator with company and filing context
+        generator = SectionEmbeddingGenerator(self.company, filing_record)
 
         extractor = SectionExtractor(pages=pages, filing_type="20-F")
         sections = extractor.get_sections()
 
         # Upsert raw section pages
-        self._upsert_filing_section_pages(sections, filing_id)
+        await self._upsert_filing_section_pages(sections, filing_id)
 
         all_chunks = []
 
@@ -158,11 +118,7 @@ class FilingTwentyF(BaseFiling):
             else:
                 continue
 
-            # Build embedding header
-            header = self._build_embedding_header(company_data, section_type, fiscal_year, fiscal_period)
-
-            # Chunk with header
-            chunks = self.markdown_chunker.split(pages=section['pages'], header=header)
+            chunks = await generator.embed(section_type, section['pages'], fiscal_year, fiscal_period)
 
             for i, chunk in enumerate(chunks):
                 all_chunks.append({

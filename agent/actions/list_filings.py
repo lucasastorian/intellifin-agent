@@ -161,7 +161,7 @@ class ListFilingsAction(BaseAction):
             )
         )
 
-    def _load_attachments(self, filing_ids: List[int]) -> dict:
+    async def _load_attachments(self, filing_ids: List[int]) -> dict:
         """Load all attachments for the given filing IDs, returns dict mapping filing_id -> list of attachments"""
         if not filing_ids:
             return {}
@@ -185,7 +185,7 @@ class ListFilingsAction(BaseAction):
 
         return attachments_by_filing
 
-    def _load_notes(self, filing_ids: List[int]) -> dict:
+    async def _load_notes(self, filing_ids: List[int]) -> dict:
         """Load all notes for the given filing IDs, returns dict mapping filing_id -> list of notes"""
         if not filing_ids:
             return {}

@@ -13,7 +13,6 @@ from pipeline.filings.filing_eightk import FilingEightK
 from pipeline.filings.filing_deffourteena import FilingDefFourteenA
 from pipeline.filings.filing_sixk import FilingSixK
 from pipeline.filings.filing_twentyf import FilingTwentyF
-from pipeline.enrichment.openai_client import OpenAIClient
 
 
 class Company:
@@ -31,20 +30,12 @@ class Company:
         set_identity(edgar_user_agent)
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
-        # Create shared OpenAIClient with optimized connection pooling
-        self.openai_client = OpenAIClient()
-
-    async def sync(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-                   end_date: Optional[str] = None) -> int:
+    async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
+                     end_date: Optional[str] = None) -> int:
         if self.company.not_found:
             return 0
 
-        return await self.upsert(forms=forms, start_date=start_date, end_date=end_date)
-
-    async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-                     end_date: Optional[str] = None) -> int:
         company = await self._get_company()
-
         if company is None:
             return 0
 
@@ -70,48 +61,23 @@ class Company:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
 
         async def upsert_filing_async(filing: EntityFiling):
-            """Async wrapper for filing upsert with timeout"""
             if await self._is_filing_synced(filing.accession_number):
-                return (None, filing.accession_number)
+                return False
 
             parser = self._get_filing_parser(filing=filing, company=company)
+            await parser.upsert()
+            return True
 
-            # Add 120 second timeout per filing to prevent hanging
-            try:
-                await asyncio.wait_for(parser.upsert(), timeout=120.0)
-            except asyncio.TimeoutError:
-                print(f"WARNING: Filing {filing.accession_number} timed out after 120s")
-                raise
-            except Exception as e:
-                # Attach accession number to exception for better error reporting
-                e.accession_number = filing.accession_number
-                raise
-
-            await self._mark_filing_synced(filing.accession_number)
-
-            return (filing.form, filing.accession_number)
-
-        # Create tasks and track progress with tqdm
         tasks = [upsert_filing_async(filing) for filing in filings]
-        results = []
+        synced = 0
 
-        with tqdm(total=len(filings), desc=f"Syncing {self.symbol}") as pbar:
+        with tqdm(total=len(filings), desc=f"Loading Edgar Filings for {self.symbol}") as pbar:
             for coro in asyncio.as_completed(tasks):
-                try:
-                    result = await coro
-                    results.append(result)
-                except Exception as e:
-                    results.append(e)
-                    # Print error immediately with accession number
-                    accession = getattr(e, 'accession_number', 'unknown')
-                    print(f"ERROR syncing filing {accession}: {e}")
-                    import traceback
-                    traceback.print_exception(type(e), e, e.__traceback__)
+                if await coro:
+                    synced += 1
                 pbar.update(1)
 
-        synced_count = sum(1 for result in results if not isinstance(result, Exception) and result[0] is not None)
-
-        return synced_count
+        return synced
 
     async def _get_company(self) -> Optional[dict]:
         response = await self.database.table("companies").select("id").contains("symbols", self.symbol).limit(1).execute()
@@ -159,28 +125,24 @@ class Company:
             1).execute()
         return len(response.data) > 0 and response.data[0].get('synced', False)
 
-    async def _mark_filing_synced(self, accession_number: str):
-        """Mark filing as synced"""
-        await self.database.table("filings").update({"synced": True}).eq("accession_number", accession_number).execute()
-
     def _get_filing_parser(self, filing: EntityFiling, company: dict) -> BaseFiling:
         if filing.form in ["10-K", "10-K/A"]:
-            return FilingTenK(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingTenK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["10-Q", "10-Q/A"]:
-            return FilingTenQ(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingTenQ(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["8-K", "8-K/A"]:
-            return FilingEightK(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingEightK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["DEF 14A", "DEF 14A/A"]:
-            return FilingDefFourteenA(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingDefFourteenA(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["6-K", "6-K/A"]:
-            return FilingSixK(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingSixK(filing=filing, company=company, database=self.database)
 
         elif filing.form in ["20-F", "20-F/A"]:
-            return FilingTwentyF(filing=filing, company=company, database=self.database, openai_client=self.openai_client)
+            return FilingTwentyF(filing=filing, company=company, database=self.database)
 
         else:
             raise ValueError(f"Did not recognize form {filing.form}")

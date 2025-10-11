@@ -15,15 +15,16 @@ from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchPressRe
 class Agent:
     start_year: int = 2018
 
-    def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20):
+    def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20,
+                 reasoning_effort: str = "medium"):
         self.edgar_user_agent = edgar_user_agent
-        self.client = OpenAIClient(model=model, temperature=temperature)
+        self.client = OpenAIClient(model=model, temperature=temperature, reasoning_effort=reasoning_effort)
         self.num_iter = 0
         self.max_iter = max_iter
         self.messages = []
         self._initialized = False
 
-        self.database = Database(schema=schema, base_path="./data/.local.db")
+        self.database = Database(schema=schema, base_path="./data/intellifin.db")
 
     async def _initialize(self):
         """Async initialization - provisions companies database if needed"""

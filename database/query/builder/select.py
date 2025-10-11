@@ -1,4 +1,5 @@
 """SELECT query builder."""
+import asyncio
 import re
 import numpy as np
 from typing import Optional, List
@@ -66,7 +67,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.order_by = []
         return self
 
-    def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
+    async def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
         """Vector similarity search using brute-force cosine similarity.
 
         Results are automatically ordered by similarity score (descending) using SQL CASE ORDER BY.
@@ -107,7 +108,8 @@ class SelectBuilder(PredMixin, SelectMixin):
         vector_store = self.db.get_or_create_vector_store(vector_table, column)
 
         # Embed query
-        query_vec = np.array(embedder.query_vector(query), dtype=np.float32)
+        query_embedding = await embedder.query_vector(query)
+        query_vec = np.array(query_embedding, dtype=np.float32)
 
         # Collect any existing WHERE clause IDs for filtering
         filter_ids = None
@@ -126,7 +128,7 @@ class SelectBuilder(PredMixin, SelectMixin):
             bound = bind_select(temp_ir, self.schema)
             planned, _ = plan_select(bound, self.schema, self.dialect)
             sql, params = generate_select(planned, self.dialect)
-            rows = self.db._exec(sql, params)
+            rows = await asyncio.to_thread(self.db._exec, sql, params)
             filter_ids = [row['id'] for row in rows]
 
         # Search vector store
@@ -175,7 +177,7 @@ class SelectBuilder(PredMixin, SelectMixin):
 
         return rows[0]['count'] if rows else 0
 
-    def execute(self):
+    async def execute(self):
         """Execute the SELECT query."""
         ir = SelectIR(
             table=self.table,
@@ -187,7 +189,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         bound = bind_select(ir, self.schema)
         planned, _ = plan_select(bound, self.schema, self.dialect)
         sql, params = generate_select(planned, self.dialect)
-        rows = self.db._exec(sql, params)
+        rows = await asyncio.to_thread(self.db._exec, sql, params)
 
         processed = []
         for row in rows:

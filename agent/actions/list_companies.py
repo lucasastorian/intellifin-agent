@@ -8,16 +8,16 @@ from agent.action_response import ActionResponse
 
 
 class ListCompanies(BaseModel):
-    """List for companies with a matching name. Returns matching companies with their symbols and metadata.
+    """List for companies with a matching name or symbol. Returns matching companies with their symbols and metadata.
 
-    - Use this when you don't know the ticker symbol for a company
-    - Performs case-insensitive partial name matching
+    - Use this when you don't know the exact ticker symbol or company name
+    - Searches by both company name (partial, case-insensitive) and ticker symbol (exact match)
     - Returns up to 10 results with ticker symbols, industry, sector, and exchanges
     """
     thought: str = Field(
         description="Explain why you're searching for this company and what you plan to do with the results"
     )
-    query: str = Field(description="Company name or partial name to search for (e.g., 'Apple', 'Microsoft')")
+    query: str = Field(description="Company name, partial name, or ticker symbol to search for (e.g., 'Apple', 'AAPL', 'Microsoft')")
 
 
 class ListCompaniesAction(BaseAction):
@@ -45,20 +45,38 @@ class ListCompaniesAction(BaseAction):
         params = f"'{args.query}'"
         self.log_start("ListCompanies", params, thought=args.thought)
 
-        result = await (
+        # Search by name (case-insensitive partial match)
+        name_results = await (
             self.database
             .table("companies")
             .select("id,name,symbols,exchanges,industry,sector,market_cap,delisted")
+            .ilike("name", args.query)
+            .limit(self.limit)
             .execute()
         )
 
-        query_lower = args.query.lower()
-        matches = [
-            c for c in result.data
-            if query_lower in c['name'].lower()
-        ]
+        # Search by symbol (exact match in JSON array)
+        symbol_results = await (
+            self.database
+            .table("companies")
+            .select("id,name,symbols,exchanges,industry,sector,market_cap,delisted")
+            .contains("symbols", args.query.upper())
+            .limit(self.limit)
+            .execute()
+        )
 
-        matches = matches[:self.limit]
+        # Merge and dedupe by ID
+        seen_ids = set()
+        matches = []
+        for result_set in [name_results.data, symbol_results.data]:
+            for company in result_set:
+                if company['id'] not in seen_ids:
+                    seen_ids.add(company['id'])
+                    matches.append(company)
+                    if len(matches) >= self.limit:
+                        break
+            if len(matches) >= self.limit:
+                break
 
         if not matches:
             self.log_done("No companies found")
