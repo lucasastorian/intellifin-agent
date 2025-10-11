@@ -1,7 +1,6 @@
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from datetime import date
-from tqdm.asyncio import tqdm
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
 
@@ -14,6 +13,9 @@ from pipeline.filings.filing_deffourteena import FilingDefFourteenA
 from pipeline.filings.filing_sixk import FilingSixK
 from pipeline.filings.filing_twentyf import FilingTwentyF
 
+if TYPE_CHECKING:
+    from agent.stream_events import StreamSink
+
 
 class Company:
     forms: List[str] = ["10-K", "10-Q", "8-K",
@@ -21,11 +23,12 @@ class Company:
                         "20-F", "6-K"]
 
     def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
-                 end_year: int = 2026):
+                 end_year: int = 2026, sink: Optional['StreamSink'] = None):
         self.symbol = symbol
         self.database = database
         self.start_year = start_year
         self.end_year = end_year
+        self.sink = sink
 
         set_identity(edgar_user_agent)
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
@@ -53,6 +56,30 @@ class Company:
 
         await self.database.table("companies").update(update_data).eq("id", company_id).execute()
 
+    async def _publish_sync_start(self, total: int):
+        """Publish sync start event to sink if available"""
+        if not self.sink:
+            return
+        from agent.stream_events import StreamEvent
+        await self.sink.publish(StreamEvent(
+            type="message_delta",
+            text=f"Syncing {total} filings for {self.symbol}...\n"
+        ))
+
+    async def _publish_sync_progress(self, synced: int, processed: int, total: int):
+        """Publish sync progress event to sink if available"""
+        if not self.sink:
+            return
+        from agent.stream_events import StreamEvent
+        if synced == processed:
+            msg = f"  {processed}/{total} filings synced\n"
+        else:
+            msg = f"  {processed}/{total} processed ({synced} new)\n"
+        await self.sink.publish(StreamEvent(
+            type="message_delta",
+            text=msg
+        ))
+
     async def _upsert_filings(self, company: dict, forms: Optional[List[str]] = None,
                               start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
         filings = self._load_filings(forms=forms)
@@ -69,13 +96,19 @@ class Company:
             return True
 
         tasks = [upsert_filing_async(filing) for filing in filings]
-        synced = 0
+        total = len(filings)
 
-        with tqdm(total=len(filings), desc=f"Loading Edgar Filings for {self.symbol}") as pbar:
-            for coro in asyncio.as_completed(tasks):
-                if await coro:
-                    synced += 1
-                pbar.update(1)
+        await self._publish_sync_start(total)
+
+        synced = 0
+        processed = 0
+        for coro in asyncio.as_completed(tasks):
+            if await coro:
+                synced += 1
+            processed += 1
+            # Only publish every 10 processed OR at completion
+            if processed % 10 == 0 or processed == total:
+                await self._publish_sync_progress(synced, processed, total)
 
         return synced
 

@@ -257,6 +257,7 @@ class CompanyFilingNotes(View):
 
     id = Field(table="filing_notes", field="id")
     title = Field(table="filing_notes", field="title")
+    preview = Field(table="filing_notes", field="preview")
     filename = Field(table="filing_notes", field="filename")
     content = Field(table="filing_notes", field="content")
 

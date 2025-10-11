@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from schema import schema
 from database import Database
+
 from agent.action_response import ActionResponse, ActionFollowUp
 from pipeline.company_provisioner import CompanyProvisioner
 from agent.system_prompt import SystemPrompt
@@ -17,7 +18,7 @@ class Agent:
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20,
-                 reasoning_effort: str = "medium", mode: AgentMode = AgentMode.FULL):
+                 reasoning_effort: Literal['minimal', 'medium', 'high'] = "medium", mode: AgentMode = AgentMode.FULL):
         self.edgar_user_agent = edgar_user_agent
         self.client = OpenAIClient(model=model, temperature=temperature, reasoning_effort=reasoning_effort)
         self.num_iter = 0
@@ -25,17 +26,10 @@ class Agent:
         self.messages = []
         self._initialized = False
         self.config = get_agent_config(mode)
+        self.abort = None
+        self.sink = None
 
         self.database = Database(schema=schema, base_path="./data/intellifin.db")
-
-    async def _initialize(self):
-        """Async initialization - provisions companies database if needed"""
-        if self._initialized:
-            return
-
-        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
-        await provisioner.provision()
-        self._initialized = True
 
     async def run(self, query: str) -> Optional[str]:
         """Orchestrates agent iterations (horizontal limit via max_iter)"""
@@ -44,23 +38,22 @@ class Agent:
         self.messages.append(Message(role="user", status="completed", content=query))
 
         all_actions = [
-            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
 
-            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
 
-            SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchFilingNotesActionNew(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
+            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
+            SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
+            SearchFilingNotesActionNew(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
 
-            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink),
 
-            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent, sink=self.sink)
         ]
 
-        # Filter actions based on config
         base_actions = [
             action for action in all_actions
             if action.__class__.__name__ in self.config.enabled_actions
@@ -115,13 +108,12 @@ class Agent:
 
         return optional_actions
 
-    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[
-        List[ActionFollowUp]]:
+    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[List[ActionFollowUp]]:
         """Executes a single step in the agent loop"""
-        # print(self.messages)
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
                                               actions=actions, allowed_actions=allowed_actions,
-                                              enable_web_search=self.config.enable_web_search)
+                                              enable_web_search=self.config.enable_web_search,
+                                              abort=self.abort)
         self.messages.append(completion)
         follow_ups = await self._call_actions(completion=completion, actions=actions)
 
@@ -143,7 +135,8 @@ class Agent:
                 response = await action.call(action=called_action)
                 self.messages.append(response.message)
 
-                # Apply context refinement if requested
+                await self._publish_action_summary(called_action.name, response)
+
                 if response.context_refinement:
                     self._apply_context_refinement(response.context_refinement)
 
@@ -177,3 +170,39 @@ class Agent:
                 error=True
             )
         )
+
+    async def _initialize(self):
+        """Async initialization - provisions companies database if needed"""
+        if self._initialized:
+            return
+
+        if self.sink:
+            from agent.stream_events import StreamEvent
+            await self.sink.publish(StreamEvent(type="message_delta", text="Initializing database...\n"))
+
+        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
+        await provisioner.provision()
+
+        if self.sink:
+            from agent.stream_events import StreamEvent
+            await self.sink.publish(StreamEvent(type="message_delta", text="Ready\n"))
+
+        self._initialized = True
+
+    async def _publish_action_summary(self, action_name: str, response: ActionResponse):
+        """Publish action summary to UI sink if available."""
+        if not self.sink or not response.summary:
+            return
+
+        from agent.stream_events import StreamEvent
+
+        summary_text = response.summary.headline
+        if response.summary.details:
+            details_str = ", ".join(f"{k}={v}" for k, v in response.summary.details.items())
+            summary_text += f" ({details_str})"
+
+        await self.sink.publish(StreamEvent(
+            type="tool_result",
+            name=action_name,
+            text=summary_text
+        ))

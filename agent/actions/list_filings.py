@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
-from agent.action_response import ActionResponse
+from agent.action_response import ActionResponse, ActionSummary
 
 AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 
@@ -158,6 +158,10 @@ class ListFilingsAction(BaseAction):
                 status="completed",
                 content=content,
                 action_id=action.id
+            ),
+            summary=ActionSummary(
+                headline=summary,
+                details={"symbols": ", ".join(args.symbols), "forms": ", ".join(args.forms)}
             )
         )
 

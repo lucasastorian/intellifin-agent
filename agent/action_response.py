@@ -21,7 +21,15 @@ class ActionFollowUp:
 
 
 @dataclass
+class ActionSummary:
+    """Compact summary of action execution for UI display"""
+    headline: str  # One-line result (e.g., "Found 5 companies")
+    details: Optional[dict] = None  # Key metrics (e.g., {"count": 5, "tickers": ["X", "Y"]})
+
+
+@dataclass
 class ActionResponse:
     message: Message
+    summary: Optional[ActionSummary] = None
     follow_up: Optional[ActionFollowUp] = None
     context_refinement: Optional[ContextRefinement] = None

@@ -1,46 +1,18 @@
-import asyncio
 import argparse
 import logging
-import signal
-import atexit
 from dotenv import load_dotenv
-from agent.agent import Agent
 from agent.agent_config import AgentMode
-from utils.print_messages import print_messages
-
-_agent_instance = None
-
-
-def cleanup_handler():
-    """Cleanup handler called on exit or signal."""
-    if _agent_instance and hasattr(_agent_instance, 'database'):
-        try:
-            _agent_instance.database.close()
-        except Exception:
-            pass
-
-
-def signal_handler(signum, frame):
-    """Handle SIGINT and SIGTERM gracefully."""
-    print(f"\nReceived signal {signum}, shutting down gracefully...")
-    cleanup_handler()
-    exit(0)
-
+from cli.intellifin_tui import launch_tui
 
 if __name__ == '__main__':
     load_dotenv()
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(cleanup_handler)
-
+    # Suppress edgar logging
     logging.getLogger('edgar.core').setLevel(logging.ERROR)
 
-    parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
-    parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''How has Netflix's (NASDAQ: NFLX) Average Revenue Per Paying User Changed from 2019 to 2024?''')
+    parser = argparse.ArgumentParser(description='IntelliFin Agent - Interactive Financial Research Assistant')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
-    parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
+    parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 20)')
     parser.add_argument('--reasoning-effort', type=str, default='high',
                         choices=['minimal', 'low', 'medium', 'high'],
                         help='Reasoning effort level (default: high)')
@@ -51,19 +23,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    agent = Agent(
+    launch_tui(
         edgar_user_agent="Lucas Astorian <lucas@intellifin.ai>",
         model=args.model,
         max_iter=args.max_iter,
         reasoning_effort=args.reasoning_effort,
         mode=AgentMode(args.mode)
     )
-
-    _agent_instance = agent
-
-    try:
-        asyncio.run(agent.run(query=args.query))
-    finally:
-        cleanup_handler()
-
-    print_messages(agent.messages)

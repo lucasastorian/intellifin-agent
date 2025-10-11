@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
-from agent.action_response import ActionResponse
+from agent.action_response import ActionResponse, ActionSummary
 
 
 class ListCompanies(BaseModel):
@@ -86,13 +86,21 @@ class ListCompaniesAction(BaseAction):
                     status="completed",
                     content=f"No companies found matching '{args.query}'",
                     action_id=action.id
+                ),
+                summary=ActionSummary(
+                    headline="No companies found",
+                    details={"query": args.query}
                 )
             )
 
         content = self._format_to_md(matches)
 
-        summary = f"Found {len(matches)} compan{'y' if len(matches) == 1 else 'ies'}"
-        self.log_done(summary)
+        summary_text = f"Found {len(matches)} compan{'y' if len(matches) == 1 else 'ies'}"
+        self.log_done(summary_text)
+
+        # Extract top tickers for summary
+        top_tickers = [c['symbols'][0] if c.get('symbols') else '' for c in matches[:3]]
+        top_tickers = [t for t in top_tickers if t]  # Filter empty
 
         return ActionResponse(
             message=Message(
@@ -100,6 +108,10 @@ class ListCompaniesAction(BaseAction):
                 status="completed",
                 content=content,
                 action_id=action.id
+            ),
+            summary=ActionSummary(
+                headline=summary_text,
+                details={"count": len(matches), "top_tickers": ", ".join(top_tickers) if top_tickers else "N/A"}
             )
         )
 

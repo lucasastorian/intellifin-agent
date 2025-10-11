@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agent.actions.base_action import BaseAction
 from agent.message import Action, Message
-from agent.action_response import ActionResponse
+from agent.action_response import ActionResponse, ActionSummary
 
 
 class Plan(BaseModel):
@@ -81,5 +81,9 @@ class PlanAction(BaseAction):
                 status="completed",
                 content=content,
                 action_id=action.id
+            ),
+            summary=ActionSummary(
+                headline=f"Created {len(args.steps)}-step plan",
+                details={"objective": args.objective[:60] + "..." if len(args.objective) > 60 else args.objective}
             )
         )
