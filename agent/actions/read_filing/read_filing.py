@@ -78,7 +78,7 @@ class ReadFilingAction(BaseAction):
         notes_result = await (
             self.database
             .table("company_filing_notes")
-            .select("id,title,filename")
+            .select("id,title,filename,preview")
             .eq("filing_id", args.filing_id)
             .order("filename")
             .execute()

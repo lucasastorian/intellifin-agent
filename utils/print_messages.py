@@ -1,3 +1,8 @@
+from typing import List
+
+from agent.message import Message, Action, WebSearch
+
+
 def _is_notebook():
     """Detect if running in Jupyter/IPython notebook"""
     try:
@@ -9,7 +14,7 @@ def _is_notebook():
     return False
 
 
-def print_messages(agent):
+def print_messages(messages: List[Message]):
     """Print all messages with formatting and separators"""
     use_markdown = _is_notebook()
 
@@ -19,7 +24,7 @@ def print_messages(agent):
         output = []
         output.append("# CONVERSATION TRANSCRIPT\n")
 
-        for i, msg in enumerate(agent.messages):
+        for i, msg in enumerate(messages):
             if msg.role == "system":
                 continue
 
@@ -40,6 +45,11 @@ def print_messages(agent):
                     for action in msg.actions:
                         output.append(f"- `{action.name}({action.body})`\n")
 
+                if msg.web_searches:
+                    output.append("\n**Web Searches:**\n")
+                    for search in msg.web_searches:
+                        output.append(f"- `{search.query})`\n")
+
             elif msg.role == "tool":
                 output.append("### TOOL\n")
                 if msg.error:
@@ -52,7 +62,7 @@ def print_messages(agent):
         print("CONVERSATION TRANSCRIPT")
         print("=" * 80 + "\n")
 
-        for i, msg in enumerate(agent.messages):
+        for i, msg in enumerate(messages):
             if msg.role == "system":
                 continue
 
@@ -72,6 +82,11 @@ def print_messages(agent):
                     print("\nActions:")
                     for action in msg.actions:
                         print(f"  - {action.name}({action.body})")
+
+                if msg.web_searches:
+                    print("\nWeb Searches:")
+                    for search in msg.web_searches:
+                        print(f"  - {search.query}")
 
             elif msg.role == "tool":
                 print("TOOL:")

@@ -150,6 +150,7 @@ class FilingSectionPages(Table):
         "properties",  # 10-K Item 2
         "legal_proceedings",  # 10-K Item 3 / 10-Q Part II Item 1
         "market_equity_matters",  # 10-K Item 5
+        "selected_financial_data",  # 10-K Item 6 (eliminated by SEC in 2021, now shows as [Reserved])
         "md&a",  # 10-K Item 7 / 10-Q Part I Item 2
         "market_risk",  # 10-K Item 7A / 10-Q Part I Item 3
         "controls_procedures",  # 10-K Item 9A / 10-Q Part I Item 4
@@ -182,6 +183,7 @@ class FilingSectionChunks(Table):
         "properties",  # 10-K Item 2
         "legal_proceedings",  # 10-K Item 3 / 10-Q Part II Item 1
         "market_equity_matters",  # 10-K Item 5
+        "selected_financial_data",  # 10-K Item 6 (eliminated by SEC in 2021, now shows as [Reserved])
         "md&a",  # 10-K Item 7 / 10-Q Part I Item 2
         "market_risk",  # 10-K Item 7A / 10-Q Part I Item 3
         "controls_procedures",  # 10-K Item 9A / 10-Q Part I Item 4

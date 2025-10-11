@@ -8,6 +8,7 @@ from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
+from agent.agent_config import AgentMode, get_agent_config
 from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
                            ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction, ReadFilingAction, )
 
@@ -16,13 +17,14 @@ class Agent:
     start_year: int = 2018
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20,
-                 reasoning_effort: str = "medium"):
+                 reasoning_effort: str = "medium", mode: AgentMode = AgentMode.FULL):
         self.edgar_user_agent = edgar_user_agent
         self.client = OpenAIClient(model=model, temperature=temperature, reasoning_effort=reasoning_effort)
         self.num_iter = 0
         self.max_iter = max_iter
         self.messages = []
         self._initialized = False
+        self.config = get_agent_config(mode)
 
         self.database = Database(schema=schema, base_path="./data/intellifin.db")
 
@@ -41,7 +43,7 @@ class Agent:
 
         self.messages.append(Message(role="user", status="completed", content=query))
 
-        base_actions = [
+        all_actions = [
             PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
             ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
@@ -56,6 +58,12 @@ class Agent:
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
             PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
+        ]
+
+        # Filter actions based on config
+        base_actions = [
+            action for action in all_actions
+            if action.__class__.__name__ in self.config.enabled_actions
         ]
 
         dynamic_actions = []
@@ -112,7 +120,8 @@ class Agent:
         """Executes a single step in the agent loop"""
         # print(self.messages)
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
-                                              actions=actions, allowed_actions=allowed_actions)
+                                              actions=actions, allowed_actions=allowed_actions,
+                                              enable_web_search=self.config.enable_web_search)
         self.messages.append(completion)
         follow_ups = await self._call_actions(completion=completion, actions=actions)
 

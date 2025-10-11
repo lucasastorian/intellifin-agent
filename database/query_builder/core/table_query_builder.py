@@ -117,3 +117,48 @@ class TableQueryBuilder:
             builder.select(returning)
         builder.regex(column, pattern)
         return builder
+
+    def fts(self, query: str, column: Optional[str] = None, returning: Optional[str] = None) -> SelectBuilder:
+        """Exact phrase search using FTS5.
+
+        Returns only results containing the exact phrase.
+
+        Args:
+            query: Exact phrase to search for
+            column: FTS-enabled column to search (optional if only one FTS column exists)
+            returning: Fields to return (optional)
+        """
+        if self.is_view:
+            type_map = self.table.type_map(self.schema)
+            fts_columns = [alias for alias, fd in type_map.items() if getattr(fd, "fts", False)]
+            all_fields = set(type_map.keys())
+        else:
+            fields = self.table.get_fields()
+            fts_columns = [name for name, field in fields.items() if getattr(field, "fts", False)]
+            all_fields = set(fields.keys())
+
+        if column:
+            if column not in fts_columns:
+                if column in all_fields:
+                    raise ValueError(
+                        f"Column '{column}' on {'view' if self.is_view else 'table'} '{self.table_name}' is not FTS-enabled. "
+                        f"FTS columns: {fts_columns}"
+                    )
+                else:
+                    raise ValueError(f"Column '{column}' does not exist on {'view' if self.is_view else 'table'} '{self.table_name}'.")
+            search_column = column
+        else:
+            if not fts_columns:
+                raise ValueError(f"{'View' if self.is_view else 'Table'} '{self.table_name}' has no FTS-enabled columns.")
+            elif len(fts_columns) > 1:
+                raise ValueError(
+                    f"{'View' if self.is_view else 'Table'} '{self.table_name}' has multiple FTS-enabled columns: {fts_columns}. "
+                    f"Please specify which column to search using the 'column' parameter."
+                )
+            search_column = fts_columns[0]
+
+        builder = SelectBuilder(self.database, self.schema, self.table_name)
+        if returning:
+            builder.select(returning)
+        builder.fts(query, search_column)
+        return builder

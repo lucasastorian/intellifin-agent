@@ -60,7 +60,7 @@ class OpenAIClient(BaseLLMClient):
             result = await asyncio.wait_for(_do_request(), timeout=self.timeout)
             duration = time.time() - start_time
 
-            print(f"[OpenAI Request] {self.model} - {duration:.2f}s (reasoning_effort={self.reasoning_effort})")
+            # print(f"[OpenAI Request] {self.model} - {duration:.2f}s (reasoning_effort={self.reasoning_effort})")
 
             if self.cache:
                 self.cache.set(

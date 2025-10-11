@@ -54,7 +54,7 @@ class OpenAIClient:
 
     async def stream_completion(self, response: AsyncStream):
         """Streams a chat completion to the console"""
-        completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[])
+        completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[], web_searches=[])
 
         async for event in response:
 
@@ -68,6 +68,7 @@ class OpenAIClient:
 
                 if event.item.type == 'reasoning':
                     completion.thoughts.append(Thought(id=event.item.id, summaries=[], index=event.output_index))
+                    print(f"Thinking: \n\n", sep="", end="")
 
                 elif event.item.type == 'function_call':
                     self.tool_call_arguments = ""
@@ -82,16 +83,21 @@ class OpenAIClient:
                 elif event.item.type == 'web_search_call':
                     web_search = WebSearch(id=event.item.id, query="", index=event.output_index)
                     completion.web_searches.append(web_search)
+                    print("Searching Web: ", sep="", end="")
+                    # print(event.item)
 
             elif event.type == 'response.reasoning_summary_part.added':
                 completion.thoughts[-1].summaries.append("")
+                print("- ", sep="", end="")
 
             elif event.type == 'response.reasoning_summary_text.delta':
                 completion.thoughts[-1].summaries[-1] += event.delta
+                print(event.delta, sep="", end="")
 
             elif event.type == 'response.reasoning_summary_text.done':
                 # Identical to previous summary deltas
                 completion.thoughts[-1].summaries[-1] = event.text
+                print("\n\n")
 
             elif event.type == 'response.reasoning_summary_part.done':
                 # Identical to previous summary deltas
@@ -124,6 +130,8 @@ class OpenAIClient:
 
                 if event.item.type == 'web_search_call':
                     completion.web_searches[-1].query = event.item.action.query
+                    print(f"{event.item.action.query}\n\n")
+                    # print(event.item)
 
             elif event.type == 'response.completed':
                 usage = event.response.usage

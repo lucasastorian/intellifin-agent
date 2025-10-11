@@ -67,6 +67,24 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.order_by = []
         return self
 
+    def fts(self, query: str, column: str):
+        """Build an FTS5 MATCH query for exact phrase matching.
+
+        Wraps the query in double quotes for exact phrase matching.
+        Only returns results containing the exact phrase.
+
+        Args:
+            query: Exact phrase to search for
+            column: Column to search
+        """
+        # Escape internal quotes and wrap in quotes for exact phrase match
+        escaped_query = query.strip().replace('"', '""')
+        fts_query = f'"{escaped_query}"'
+
+        self._and(KeywordFTS(Col(column), fts_query))
+        self.order_by = []
+        return self
+
     async def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
         """Vector similarity search using brute-force cosine similarity.
 

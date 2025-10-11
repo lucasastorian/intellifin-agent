@@ -98,9 +98,12 @@ class FilingTenK(BaseFiling):
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int, filing_type: Literal['10-K', '10-Q', '20-F']):
+    async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int,
+                                    filing_type: Literal['10-K', '10-Q', '20-F']):
         """Chunks the filing pages and upserts them"""
-        filing_record = (await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute()).data[0]
+        filing_record = (
+            await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq(
+                "id", filing_id).execute()).data[0]
         fiscal_year = filing_record.get('fiscal_year')
         fiscal_period = filing_record.get('fiscal_period')
 
@@ -115,7 +118,7 @@ class FilingTenK(BaseFiling):
         all_chunks = []
 
         for section in sections:
-            if section['item'] in ['ITEM 1', 'ITEM 1A', 'ITEM 2', 'ITEM 3', 'ITEM 5', 'ITEM 7',
+            if section['item'] in ['ITEM 1', 'ITEM 1A', 'ITEM 2', 'ITEM 3', 'ITEM 5', 'ITEM 6', 'ITEM 7',
                                    'ITEM 7A', 'ITEM 9A', 'ITEM 9B']:
                 section_type = {
                     "ITEM 1": "business",
@@ -123,6 +126,7 @@ class FilingTenK(BaseFiling):
                     "ITEM 2": "properties",
                     "ITEM 3": "legal_proceedings",
                     "ITEM 5": "market_equity_matters",
+                    "ITEM 6": "selected_financial_data",
                     "ITEM 7": "md&a",
                     "ITEM 7A": "market_risk",
                     "ITEM 9A": "controls_procedures",
@@ -148,4 +152,4 @@ class FilingTenK(BaseFiling):
 
         if all_chunks:
             await self.database.table("filing_section_chunks").upsert(all_chunks,
-                                                                on_conflict="filing_id,section,index").execute()
+                                                                      on_conflict="filing_id,section,index").execute()

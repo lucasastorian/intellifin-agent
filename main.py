@@ -5,6 +5,7 @@ import signal
 import atexit
 from dotenv import load_dotenv
 from agent.agent import Agent
+from agent.agent_config import AgentMode
 from utils.print_messages import print_messages
 
 _agent_instance = None
@@ -34,9 +35,6 @@ if __name__ == '__main__':
     atexit.register(cleanup_handler)
 
     logging.getLogger('edgar.core').setLevel(logging.ERROR)
-    logging.getLogger('pipeline.filings.filing_tenk').setLevel(logging.ERROR)
-    logging.getLogger('pipeline.filings.filing_tenq').setLevel(logging.ERROR)
-    logging.getLogger('pipeline.filings.filing_twentyf').setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
@@ -46,6 +44,10 @@ if __name__ == '__main__':
     parser.add_argument('--reasoning-effort', type=str, default='high',
                         choices=['minimal', 'low', 'medium', 'high'],
                         help='Reasoning effort level (default: high)')
+    parser.add_argument('--mode', type=str, default='full_no_web',
+                        choices=['basic', 'web_search', 'web_code', 'full', 'full_no_web'],
+                        help='Agent mode: basic (no tools), web_search (web only), web_code (web+code), '
+                             'full (all tools+web), full_no_web (all tools, no web) (default: full_no_web)')
 
     args = parser.parse_args()
 
@@ -53,7 +55,8 @@ if __name__ == '__main__':
         edgar_user_agent="Lucas Astorian <lucas@intellifin.ai>",
         model=args.model,
         max_iter=args.max_iter,
-        reasoning_effort=args.reasoning_effort
+        reasoning_effort=args.reasoning_effort,
+        mode=AgentMode(args.mode)
     )
 
     _agent_instance = agent
@@ -63,4 +66,4 @@ if __name__ == '__main__':
     finally:
         cleanup_handler()
 
-    print_messages(agent)
+    print_messages(agent.messages)
