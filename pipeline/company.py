@@ -45,6 +45,10 @@ class Company:
 
         synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
                                                   end_date=end_date)
+
+        if include_earnings_transcripts:
+            await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
+
         await self.on_sync_complete(company_id=company['id'])
 
         return synced_count
@@ -152,15 +156,41 @@ class Company:
         else:
             raise ValueError(f"Did not recognize form {filing.form}")
 
-    async def _sync_transcripts(self, company: dict):
-        """Syncs all the earnings transcripts for the given date range"""
-        # NOTE: We need a way to ONLY sync transcripts the first time
-        tasks = []
-        transcript_data = await self._load_transcripts()
-        for data in transcript_data:
-            tasks.append(self._upsert_transcript(data=data, company=company))
+    async def _sync_transcripts(self, company: dict, start_date: Optional[str] = None,
+                               end_date: Optional[str] = None):
+        """Syncs earnings transcripts for the given date range (uses batch endpoint per fiscal year)"""
+        async with aiohttp.ClientSession() as session:
+            all_transcript_dates = await self._load_transcript_dates(session)
+            filtered_dates = self._filter_transcript_dates(all_transcript_dates, start_date, end_date)
+            fiscal_years_needed = set(meta['fiscalYear'] for meta in filtered_dates)
 
-        await asyncio.gather(**tasks)
+            years_to_load = []
+            for fiscal_year in fiscal_years_needed:
+                if not await self._are_all_transcripts_synced_for_year(company['id'], fiscal_year, all_transcript_dates):
+                    years_to_load.append(fiscal_year)
+
+            if not years_to_load:
+                return 0
+
+            tasks = [self._load_transcript_batch(fiscal_year, session) for fiscal_year in years_to_load]
+            batch_results = await asyncio.gather(*tasks)
+
+            upsert_tasks = []
+            for batch_data in batch_results:
+                for transcript_data in batch_data:
+                    if self._is_transcript_in_range(transcript_data, filtered_dates):
+                        transcript = Transcript(
+                            content=transcript_data['content'],
+                            fiscal_year=transcript_data['year'],
+                            fiscal_quarter=transcript_data['quarter'],
+                            date=transcript_data['date'],
+                            company=company,
+                            database=self.database
+                        )
+                        upsert_tasks.append(transcript.upsert())
+
+            results = await asyncio.gather(*upsert_tasks)
+            return sum(1 for r in results if r)
 
     async def _upsert_transcript(self, data: dict, company: dict):
         """Upserts a single transcript"""
@@ -179,7 +209,7 @@ class Company:
             for fiscal_year in range(self.start_year, self.end_year):
                 tasks.append(self._load_transcript_batch(fiscal_year=fiscal_year, session=session))
 
-        transcript_data = await asyncio.gather(**tasks)
+        transcript_data = await asyncio.gather(*tasks)
 
         return transcript_data
 
@@ -200,6 +230,55 @@ class Company:
         async with session.get(f"https://financialmodelingprep.com/stable/earning-call-transcript-dates", params=params) as response:
             data = await response.json()
 
-            # return a List[dict] with keys quarter, fiscalYear, and date (YYYY-MM-DD) for ALL available earnings transcripts for the given symbol
             return data
 
+    @staticmethod
+    def _filter_transcript_dates(transcript_dates: List[dict], start_date: Optional[str],
+                                 end_date: Optional[str]) -> List[dict]:
+        """Filter transcript metadata by date range"""
+        if not start_date and not end_date:
+            return transcript_dates
+
+        start = date.fromisoformat(start_date) if start_date else None
+        end = date.fromisoformat(end_date) if end_date else None
+
+        filtered = []
+        for meta in transcript_dates:
+            transcript_date = date.fromisoformat(meta['date'])
+            if start and transcript_date < start:
+                continue
+
+            if end and transcript_date > end:
+                continue
+
+            filtered.append(meta)
+
+        return filtered
+
+    async def _are_all_transcripts_synced_for_year(self, company_id: int, fiscal_year: int,
+                                                   all_transcript_dates: List[dict]) -> bool:
+        """Check if ALL available transcripts for a fiscal year are synced (cross-reference FMP vs SQLite)"""
+        available_quarters = set(
+            meta['quarter'] for meta in all_transcript_dates
+            if meta['fiscalYear'] == fiscal_year
+        )
+
+        if not available_quarters:
+            return True
+
+        response = await self.database.table("earnings_transcripts").select("fiscal_period").eq(
+            "company_id", company_id
+        ).eq("fiscal_year", fiscal_year).execute()
+
+        synced_periods = set(r['fiscal_period'] for r in response.data)
+
+        return available_quarters <= synced_periods
+
+    @staticmethod
+    def _is_transcript_in_range(transcript_data: dict, filtered_dates: List[dict]) -> bool:
+        """Check if transcript matches any of the filtered date range metadata"""
+        return any(
+            meta['fiscalYear'] == transcript_data['year'] and
+            meta['quarter'] == transcript_data['quarter']
+            for meta in filtered_dates
+        )
