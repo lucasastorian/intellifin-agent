@@ -28,13 +28,9 @@ class DeleteBuilder(PredMixin):
         bound = bind_delete(ir, self.schema)
         sql, params = generate_delete(bound, self.dialect)
 
-        def _exec_delete():
-            with self.db._lock:
-                rows = self.db._exec_unsafe(sql, params)
-                self.db.conn.commit()
-                return rows
-
-        rows = await asyncio.to_thread(_exec_delete)
+        with self.db._lock:
+            rows = self.db._exec_unsafe(sql, params)
+            self.db.conn.commit()
 
         # Tombstone vectors AFTER delete, BEFORE return
         self._tombstone_vectors(rows)

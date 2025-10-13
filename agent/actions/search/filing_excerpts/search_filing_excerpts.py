@@ -192,13 +192,12 @@ class SearchFilingSectionsAction(BaseAction):
             depth_map = {'low': 5, 'medium': 15, 'high': 30}
             limit = depth_map[args.depth]
 
-            await query.vector_search(
+            result = await query.vector_search(
                 args.excerpt_description,
                 "embedding",
                 topk=limit,
                 return_scores=True
-            )
-            result = await query.execute()
+            ).execute()
 
             for r in result.data:
                 r['_type'] = 'filing_section_chunk'

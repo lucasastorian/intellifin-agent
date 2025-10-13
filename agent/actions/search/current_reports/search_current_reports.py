@@ -186,13 +186,12 @@ class SearchCurrentReportsAction(BaseAction):
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
             )
-            await query.vector_search(
+            result = await query.vector_search(
                 args.query_description,
                 "summary",
                 topk=limit,
                 return_scores=True
-            )
-            result = await query.execute()
+            ).execute()
 
             return result.data
 

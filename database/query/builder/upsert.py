@@ -156,7 +156,7 @@ class UpsertBuilder:
         total_params = num_cols * len(serialized_rows)
         use_executemany = total_params > max_vars and not has_vector_fields and not use_select_insert
 
-        def _exec_upsert():
+        async def _exec_upsert():
             all_results = []
             with self.db.transaction():
                 if use_select_insert:
@@ -200,7 +200,7 @@ class UpsertBuilder:
                         if self.returning_all:
                             sql += f" RETURNING *"
 
-                        rows = self.db._exec(sql, params)
+                        rows = await self.db._exec(sql, params)
                         for r in rows:
                             r = self.db._deserialize_json_fields(self.table, r)
                             all_results.append(r)
@@ -236,14 +236,14 @@ class UpsertBuilder:
                             returning_all=self.returning_all,
                         )
                         sql, params = generate_upsert(ir, self.dialect)
-                        rows = self.db._exec(sql, params)
+                        rows = await self.db._exec(sql, params)
 
                         for row in rows:
                             row = self.db._deserialize_json_fields(self.table, row)
                             all_results.append(row)
             return all_results
 
-        all_results = await asyncio.to_thread(_exec_upsert)
+        all_results = await _exec_upsert()
 
         if all_results is None:
             # executemany was used, no rows returned

@@ -98,8 +98,8 @@ class VoyageEmbeddings:
         logging.debug(f"Rate limiting: {estimated_tokens} tokens, {len(texts)} texts")
 
         try:
-            with self.request_rate_limiter.context():
-                with self.token_rate_limiter.context(estimated_tokens) as update_func:
+            async with self.request_rate_limiter.context():
+                async with self.token_rate_limiter.context(estimated_tokens) as update_func:
                     response = await self.client.embed(
                         texts=texts,
                         model=self.model,

@@ -38,7 +38,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''How has Netflix's (NASDAQ: NFLX) Average Revenue Per Paying User Changed from 2019 to 2024?''')
+                        default='''Can you create a discounted cash flow model of Nvidia?''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='high',

@@ -262,7 +262,7 @@ class Database:
             self.conn.rollback()
             raise DatabaseError(str(e)) from e
 
-    def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
+    async def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
         """Execute SQL with error handling and return rows as dicts."""
         with self._lock:
             return self._exec_unsafe(sql, params)

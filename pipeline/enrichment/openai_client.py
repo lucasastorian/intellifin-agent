@@ -22,7 +22,7 @@ class OpenAIClient(BaseLLMClient):
     async def parse(self, system_prompt: str, user_message: str, response_model: Type[T]) -> T:
         """Generate structured output using OpenAI streaming with minimal reasoning"""
         if self.cache:
-            cached = self.cache.get(
+            cached = await self.cache.get(
                 model=self.model,
                 system_prompt=system_prompt,
                 user_message=user_message,
@@ -31,7 +31,6 @@ class OpenAIClient(BaseLLMClient):
             )
 
             if cached is not None:
-                print(f"[OpenAI Cache Hit] {self.model}")
                 return cached
 
         start_time = time.time()
@@ -63,7 +62,7 @@ class OpenAIClient(BaseLLMClient):
             # print(f"[OpenAI Request] {self.model} - {duration:.2f}s (reasoning_effort={self.reasoning_effort})")
 
             if self.cache:
-                self.cache.set(
+                await self.cache.set(
                     model=self.model,
                     system_prompt=system_prompt,
                     user_message=user_message,

@@ -197,7 +197,9 @@ class BaseFiling(ABC):
             filing_id=filing_id,
             company_id=self.company_id,
             database=self.database,
-            fiscal_period=fiscal_period
+            fiscal_period=fiscal_period,
+            form=self.filing.form,
+            accession_number=self.accession_number
         )
         await statements.upsert_statements()
 
@@ -228,9 +230,9 @@ class BaseFiling(ABC):
 
     async def _update_filing_counts(self, filing_id: int):
         """Updates the filing with page count and attachment count"""
-        num_pages = self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
+        num_pages = await self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
 
-        num_attachments = self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
+        num_attachments = await self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
 
         await self.database.table("filings").update({
             "num_pages": num_pages,
@@ -354,10 +356,9 @@ class BaseFiling(ABC):
             for att in attachment_data
         ]
 
-        # 30s timeout for parallel execution (httpx has 15s read timeout per call)
         summaries = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
-            timeout=30.0
+            timeout=180
         )
 
         updates = []
@@ -414,11 +415,10 @@ class BaseFiling(ABC):
             for note in notes.data
         ]
 
-        # 30s timeout for parallel execution
         try:
             previews = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=30.0
+                timeout=180
             )
         except asyncio.TimeoutError:
             print(f"WARNING: Note preview enrichment timed out after 30s")

@@ -85,7 +85,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.order_by = []
         return self
 
-    async def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
+    def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):
         """Vector similarity search using brute-force cosine similarity.
 
         Results are automatically ordered by similarity score (descending) using SQL CASE ORDER BY.
@@ -99,13 +99,26 @@ class SelectBuilder(PredMixin, SelectMixin):
             return_scores: If True, _score field is guaranteed present (deprecated - always True)
 
         Returns:
-            self (for chaining .select().execute())
+            self (for chaining .execute())
 
         Note:
+            - Embedding happens at execute() time, so this method is synchronous and chainable
             - Any WHERE predicates added before vector_search() filter the candidate set
             - Results are ordered by similarity score, not by any subsequent .order() calls
             - Use .limit() to further restrict results beyond topk
         """
+        # Store parameters for deferred execution
+        self._vector_search_params = {
+            'query': query,
+            'column': column,
+            'topk': topk,
+            'embedder': embedder,
+            'return_scores': return_scores
+        }
+        return self
+
+    async def _do_vector_search(self, query: str, column: str, topk: int, embedder, return_scores: bool):
+        """Internal: Perform the actual vector search with embedding."""
         if embedder is None:
             embedder = getattr(self.db, 'embedder', None)
             if embedder is None:
@@ -146,7 +159,7 @@ class SelectBuilder(PredMixin, SelectMixin):
             bound = bind_select(temp_ir, self.schema)
             planned, _ = plan_select(bound, self.schema, self.dialect)
             sql, params = generate_select(planned, self.dialect)
-            rows = await asyncio.to_thread(self.db._exec, sql, params)
+            rows = await self.db._exec(sql, params)
             filter_ids = [row['id'] for row in rows]
 
         # Search vector store
@@ -177,9 +190,7 @@ class SelectBuilder(PredMixin, SelectMixin):
             # order_by expects list of tuples: (expression, desc_bool)
             self.order_by = [(f"CASE id {order_cases} END", False)]  # False = ASC
 
-        return self
-
-    def count(self) -> int:
+    async def count(self) -> int:
         """Execute COUNT(*) query and return the integer count directly."""
         ir = SelectIR(
             table=self.table,
@@ -191,12 +202,16 @@ class SelectBuilder(PredMixin, SelectMixin):
         bound = bind_select(ir, self.schema)
         planned, _ = plan_select(bound, self.schema, self.dialect)
         sql, params = generate_select(planned, self.dialect)
-        rows = self.db._exec(sql, params)
+        rows = await self.db._exec(sql, params)
 
         return rows[0]['count'] if rows else 0
 
     async def execute(self):
         """Execute the SELECT query."""
+        # Perform vector search if requested (deferred from vector_search() call)
+        if hasattr(self, '_vector_search_params'):
+            await self._do_vector_search(**self._vector_search_params)
+
         ir = SelectIR(
             table=self.table,
             columns=self.selected,
@@ -207,7 +222,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         bound = bind_select(ir, self.schema)
         planned, _ = plan_select(bound, self.schema, self.dialect)
         sql, params = generate_select(planned, self.dialect)
-        rows = await asyncio.to_thread(self.db._exec, sql, params)
+        rows = await self.db._exec(sql, params)
 
         processed = []
         for row in rows:

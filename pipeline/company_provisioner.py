@@ -8,12 +8,12 @@ from edgar import Company as EdgarCompany, set_identity
 
 
 class CompanyProvisioner:
-    CSV_PATH = "./data/us_listed_stocks.csv"
     SEC_MAPPING_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 
-    def __init__(self, database: Database, edgar_user_agent: str):
+    def __init__(self, database: Database, edgar_user_agent: str, path: str = "./data/us_listed_stocks.csv"):
         self.database = database
         self.edgar_user_agent = edgar_user_agent
+        self.csv_path = path
 
     async def should_provision(self) -> bool:
         try:
@@ -22,7 +22,7 @@ class CompanyProvisioner:
         except Exception:
             return True
 
-    async def provision(self):
+    async def provision(self, path: str = None):
         if not await self.should_provision():
             return
 
@@ -39,16 +39,16 @@ class CompanyProvisioner:
     def _load_csv(self) -> Dict[str, Dict]:
         symbol_map = {}
 
-        csv_path = Path(self.CSV_PATH)
+        csv_path = Path(self.csv_path)
         if not csv_path.exists():
-            print(f"\n  ⚠ CSV not found: {self.CSV_PATH}", flush=True)
+            print(f"\n  ⚠ CSV not found: {self.csv_path}", flush=True)
             return {}
 
         with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 symbol = row['Symbol'].strip().upper()
-                # Parse delisted field (case-insensitive, handles True/true/TRUE)
+
                 delisted_str = row.get('Delisted', 'False').strip().lower()
                 delisted = delisted_str in ('true', '1', 'yes')
 

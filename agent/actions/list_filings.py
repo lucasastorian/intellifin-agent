@@ -11,7 +11,11 @@ AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 
 
 class ListFilings(BaseModel):
-    """List available SEC filings based on the ticker symbol, forms, and start report date (limited to 50 filings)
+    """List available SEC filings based on the ticker symbol, forms, and date range (limited to 50 filings)
+
+    IMPORTANT: Date filtering is by REPORT_DATE (fiscal period end date), NOT filing_date (SEC submission date).
+    Example: A 2019 10-K filed in January 2020 has report_date in 2019, so it will NOT appear if start_date is 2020-01-01.
+    To find filings for fiscal year 2019, use start_date in 2019 (e.g., 2019-01-01).
 
     - Use this first to identify filings before reading content via ReadFiling or searching via Search actions
     - Returns a Markdown table with: id, form, title (for 8-K/6-K), items (for 8-K), pages, attachments count,
@@ -26,9 +30,10 @@ class ListFilings(BaseModel):
     )
     symbols: List[str] = Field(..., description="Ticker symbols to include (e.g., ['AAPL','MSFT']).", min_length=1)
     forms: List[AllowedForm] = Field(..., description="Forms to include in the search results. ", min_length=1)
-    start_date: str = Field(..., description="Filter by report_date >= this ISO date 'YYYY-MM-DD'.")
-    end_date: Optional[str] = Field(..., description="Filter by report_date <= this ISO date 'YYYY-MM-DD'. "
-                                                     "Defaults to today.")
+    start_date: str = Field(..., description="Filter by report_date (fiscal period end) >= this ISO date 'YYYY-MM-DD'. "
+                                            "NOT filing_date. For fiscal year 2019 filings, use a 2019 start date.")
+    end_date: Optional[str] = Field(..., description="Filter by report_date (fiscal period end) <= this ISO date 'YYYY-MM-DD'. "
+                                                     "NOT filing_date. Defaults to today.")
     # include_attachments: Optional[bool] = Field(description="Whether to list the attachments for each filing",
     #                                             default=False)
     # include_notes: Optional[bool] = Field(description="Whether to list the notes available for each filing",

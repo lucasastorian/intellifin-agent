@@ -34,13 +34,9 @@ class UpdateBuilder(PredMixin):
         bound = bind_update(ir, self.schema)
         sql, params = generate_update(bound, self.dialect)
 
-        def _exec_update():
-            with self.db._lock:
-                rows = self.db._exec_unsafe(sql, params)
-                self.db.conn.commit()
-                return rows
-
-        rows = await asyncio.to_thread(_exec_update)
+        with self.db._lock:
+            rows = self.db._exec_unsafe(sql, params)
+            self.db.conn.commit()
 
         processed = []
         for row in rows:

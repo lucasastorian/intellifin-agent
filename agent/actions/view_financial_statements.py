@@ -134,10 +134,8 @@ class ViewFinancialStatementsAction(BaseAction):
                     )
                 )
 
-            # Format as markdown table
             content = self._format_as_markdown(merged_df, args.symbol, args.statement_type, args.report_type)
 
-            # Count periods in final output
             period_cols = [col for col in merged_df.columns if col not in ['concept', 'label', 'level', 'axis', 'dimension']]
             self.log_done(f"Merged {len(period_cols)} period(s)")
             return ActionResponse(

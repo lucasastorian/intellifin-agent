@@ -37,28 +37,24 @@ class InsertBuilder:
         total_params = num_cols * len(serialized_rows)
         use_executemany = total_params > max_vars
 
-        def _exec_insert():
-            all_results = []
-            with self.db.transaction():
-                if use_executemany:
-                    sql = f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) VALUES ({', '.join(['?'] * num_cols)})"
-                    param_rows = [[row[c] for c in cols] for row in serialized_rows]
-                    self.db.conn.executemany(sql, param_rows)
-                    return None  # Signal executemany was used
-                else:
-                    batch_size = max(1, max_vars // num_cols)
-                    for i in range(0, len(serialized_rows), batch_size):
-                        batch = serialized_rows[i:i + batch_size]
-                        ir = InsertIR(table=self.table, rows=batch)
-                        sql, params = generate_insert(ir, self.dialect)
-                        rows = self.db._exec(sql, params)
+        all_results = []
+        with self.db.transaction():
+            if use_executemany:
+                sql = f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) VALUES ({', '.join(['?'] * num_cols)})"
+                param_rows = [[row[c] for c in cols] for row in serialized_rows]
+                self.db.conn.executemany(sql, param_rows)
+                all_results = None  # Signal executemany was used
+            else:
+                batch_size = max(1, max_vars // num_cols)
+                for i in range(0, len(serialized_rows), batch_size):
+                    batch = serialized_rows[i:i + batch_size]
+                    ir = InsertIR(table=self.table, rows=batch)
+                    sql, params = generate_insert(ir, self.dialect)
+                    rows = await self.db._exec(sql, params)
 
-                        for row in rows:
-                            row = self.db._deserialize_json_fields(self.table, row)
-                            all_results.append(row)
-            return all_results
-
-        all_results = await asyncio.to_thread(_exec_insert)
+                    for row in rows:
+                        row = self.db._deserialize_json_fields(self.table, row)
+                        all_results.append(row)
 
         if all_results is None:
             # executemany was used, no rows returned

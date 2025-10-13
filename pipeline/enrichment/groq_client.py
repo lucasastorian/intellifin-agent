@@ -33,7 +33,7 @@ class GroqClient(BaseLLMClient):
         """
         # Check cache first
         if self.cache:
-            cached = self.cache.get(
+            cached = await self.cache.get(
                 model=self.model,
                 system_prompt=system_prompt,
                 user_message=user_message,
@@ -69,7 +69,7 @@ class GroqClient(BaseLLMClient):
             result = response_model.model_validate(json.loads(response.choices[0].message.content))
 
             if self.cache:
-                self.cache.set(
+                await self.cache.set(
                     model=self.model,
                     system_prompt=system_prompt,
                     user_message=user_message,
