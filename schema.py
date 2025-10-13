@@ -431,10 +431,10 @@ class EarningsTranscripts(Table):
     __tablename__ = "earnings_transcripts"
 
     id = Serial()
-    fiscal_year: Integer(nullable=False)
+    fiscal_year = Integer(nullable=False)
     fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=False)
 
-    sections: JSONField(nullable=False)  # A list of formatted JSON sections
+    sections = JSONField(nullable=False)  # A list of formatted JSON sections
 
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
 
@@ -445,14 +445,14 @@ class EarningsTranscripts(Table):
 
 
 class EarningsTranscriptChunks(Table):
-    __tablename__ = "earnings_transcripts"
+    __tablename__ = "earnings_transcript_chunks"
 
     id = Serial()
 
-    index: Integer(nullable=False)
+    index = Integer(nullable=False)
 
-    sections: JSONField(nullable=False)
-    embedding: Text(nullable=False, fts=True, vector=True)
+    sections = JSONField(nullable=False)
+    embedding = Text(nullable=False, fts=True, vector=True)
 
     transcript_id = Integer(nullable=False, foreign_key="earnings_transcripts.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -560,6 +560,27 @@ class CompanyFilingAttachmentChunks(View):
     company_industry = Field(table="companies", field="industry")
 
 
+class CompanyEarningsTranscriptChunks(View):
+    __viewname__ = "company_earnings_transcript_chunks"
+    __tables__ = (EarningsTranscriptChunks, EarningsTranscripts, Companies)
+
+    id = Field(table="earnings_transcript_chunks", field="id")
+    index = Field(table="earnings_transcript_chunks", field="index")
+    sections = Field(table="earnings_transcript_chunks", field="sections")
+    embedding = Field(table="earnings_transcript_chunks", field="embedding")
+
+    transcript_id = Field(table="earnings_transcript_chunks", field="transcript_id")
+    fiscal_year = Field(table="earnings_transcripts", field="fiscal_year")
+    fiscal_period = Field(table="earnings_transcripts", field="fiscal_period")
+
+    company_id = Field(table="earnings_transcript_chunks", field="company_id")
+    company_name = Field(table="companies", field="name")
+    company_symbols = Field(table="companies", field="symbols")
+    company_exchanges = Field(table="companies", field="exchanges")
+    company_sector = Field(table="companies", field="sector")
+    company_industry = Field(table="companies", field="industry")
+
+
 schema = Schema()
 schema.add_table(Companies)
 schema.add_table(Filings)
@@ -572,6 +593,8 @@ schema.add_table(FilingAttachmentChunks)
 schema.add_table(FilingSectionChunks)
 schema.add_table(FilingNoteChunks)
 schema.add_table(FilingSectionPages)
+schema.add_table(EarningsTranscripts)
+schema.add_table(EarningsTranscriptChunks)
 
 schema.add_view(CompanyFilings)
 schema.add_view(CompanyFilingPages)
@@ -582,3 +605,4 @@ schema.add_view(CompanyFinancialStatements)
 schema.add_view(CompanyFilingAttachments)
 schema.add_view(CompanyFilingAttachmentPages)
 schema.add_view(CompanyFilingAttachmentChunks)
+schema.add_view(CompanyEarningsTranscriptChunks)

@@ -10,7 +10,7 @@ from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.agent_config import AgentMode, get_agent_config
 from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
-                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction, ReadFilingAction, )
+                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction, SemanticSearchAction, )
 
 
 class Agent:
@@ -46,25 +46,26 @@ class Agent:
         all_actions = [
             PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            #
+            # SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # SearchFilingNotesActionNew(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            SearchFilingNotesActionNew(database=self.database, edgar_user_agent=self.edgar_user_agent),
-
+            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
             PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
         ]
 
-        # Filter actions based on config
-        base_actions = [
-            action for action in all_actions
-            if action.__class__.__name__ in self.config.enabled_actions
-        ]
+        base_actions = all_actions
+        # base_actions = [
+        #     action for action in all_actions
+        #     if action.__class__.__name__ in self.config.enabled_actions
+        # ]
 
         dynamic_actions = []
 

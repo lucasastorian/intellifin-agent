@@ -38,12 +38,12 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''Can you create a discounted cash flow model of Nvidia?''')
+                        default='''How has US Steel addressed its planned merger with Nippon Steel and its effect on its business operations?''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
-    parser.add_argument('--reasoning-effort', type=str, default='high',
+    parser.add_argument('--reasoning-effort', type=str, default='minimal',
                         choices=['minimal', 'low', 'medium', 'high'],
-                        help='Reasoning effort level (default: high)')
+                        help='Reasoning effort level (default: minimal)')
     parser.add_argument('--mode', type=str, default='full_no_web',
                         choices=['basic', 'web_search', 'web_code', 'full', 'full_no_web'],
                         help='Agent mode: basic (no tools), web_search (web only), web_code (web+code), '

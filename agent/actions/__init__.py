@@ -9,6 +9,7 @@ from agent.actions.search.press_releases.search_press_releases import SearchPres
 from agent.actions.search.current_reports.search_current_reports import SearchCurrentReportsAction
 from agent.actions.search.filing_notes.search_filing_notes import SearchFilingNotesAction as SearchFilingNotesActionNew
 from agent.actions.read_filing.read_filing import ReadFilingAction
+from agent.actions.semantic_search_action import SemanticSearchAction
 
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "SearchPressReleasesAction",
     "SearchCurrentReportsAction",
     "SearchFilingNotesActionNew",
-    "ReadFilingAction"
+    "ReadFilingAction",
+    "SemanticSearchAction"
 ]

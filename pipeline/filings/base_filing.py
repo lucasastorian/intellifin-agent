@@ -100,7 +100,7 @@ class BaseFiling(ABC):
 
     async def _mark_synced(self, filing_id: int):
         """Mark this filing as synced in the database"""
-        await self.database.table("filings").update({"synced": True}).eq("filing_id", filing_id).execute()
+        await self.database.table("filings").update({"synced": True}).eq("id", filing_id).execute()
 
     async def _upsert_filing_pages(self, filing_id: int):
         """Creates a record for the filing pages and returns the raw pages"""
@@ -314,7 +314,7 @@ class BaseFiling(ABC):
             "report_date": self.report_date
         }
 
-        generator = AttachmentEmbeddingGenerator(self.company, filing_data)
+        generator = AttachmentEmbeddingGenerator(self.company, filing_data, chunk_size=1024, chunk_overlap=0)
         all_chunks_data = []
 
         for pr_data in press_release_data:

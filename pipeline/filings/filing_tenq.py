@@ -119,7 +119,7 @@ class FilingTenQ(BaseFiling):
     async def _upsert_filing_section_chunks(self, filing: dict, sections: List[dict]):
         """Upserts the filing section chunks"""
         fiscal_year = filing.get('fiscal_year')
-        fiscal_period = fiscal_year.get('fiscal_period')
+        fiscal_period = filing.get('fiscal_period')
 
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
