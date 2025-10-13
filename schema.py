@@ -190,6 +190,7 @@ class FilingSectionChunks(Table):
         "other_information",  # 10-K Item 9B
         "unregistered_sales_equity",  # 10-Q Part II Item 2 (buybacks, private placements)
         "other"  # fallback (store raw heading)
+        "current_report"  # Includes the raw content of a current report filing (excluding cover page)
     ], nullable=False, index=True)
 
     index = Integer(nullable=False)

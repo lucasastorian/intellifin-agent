@@ -18,16 +18,26 @@ class FilingTwentyF(BaseFiling):
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
+        # Core filing and pages
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
-        await self._upsert_filing_notes(filing_id=filing['id'], filing=filing)
-        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
+
+        # Core filing sections & section chunks
         sections = await self._upsert_filing_section_pages(pages=pages, filing_id=filing['id'])
         await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
-        # TODO: Upsert attachments here?
-        await self._update_filing_counts(num_pages=len(pages), num_attachments=None, filing_id=filing['id'])
+        # Financial statements
+        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
+        # Filing notes and filing note chunks
+        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+
+        # TODO: Attachments / press release??
+        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+
+        # Update metadata + complete
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=None, filing_id=filing['id'])
         await self._mark_synced(filing_id=filing['id'])
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:

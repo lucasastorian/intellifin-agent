@@ -11,6 +11,7 @@ class SectionEmbeddingGenerator(BaseEmbeddingGenerator):
         if section_type:
             section_name = section_type.replace('_', ' ').title()
             return f"\n## {section_name}\n"
+
         return ""
 
     async def embed(self, section_type: str, pages: List[dict], fiscal_year: int = None, fiscal_period: str = None) -> List[dict]:
