@@ -63,31 +63,59 @@ class BaseFiling(ABC):
             exhibit_number: Exhibit number without "EX-" prefix (e.g., "99.1", "10.2", "3.1")
 
         Returns:
-            Type string: press_release, material_contract, corporate_governance, debt_securities,
-                        merger_acquisition, subsidiaries, legal_compliance, or other
+            Type string matching the granular types in FilingAttachments enum
         """
-        prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
+        parts = exhibit_number.split(".")
+        prefix = parts[0]
+        suffix = parts[1] if len(parts) > 1 else None
 
-        if prefix == "99":
-            return "press_release"
+        # Underwriting agreements (1.x)
+        if prefix == "1":
+            return "underwriting_agreement"
 
+        # Merger agreements (2.1)
+        elif prefix == "2":
+            if suffix == "1":
+                return "merger_agreement"
+            return "other"
+
+        # Charter/bylaws (3.x)
+        elif prefix == "3":
+            if suffix == "1":
+                return "certificate_of_designations"
+            elif suffix == "2":
+                return "bylaws"
+            else:
+                return "charter"
+
+        # Debt instruments (4.x)
+        elif prefix == "4":
+            if suffix == "1":
+                return "indenture"
+            elif suffix == "2":
+                return "supplemental_indenture"
+            else:
+                return "debt_instrument"
+
+        # Legal opinions (5.x)
+        elif prefix == "5":
+            return "legal_opinion"
+
+        # Material contracts (10.x)
         elif prefix == "10":
             return "material_contract"
 
-        elif prefix == "3":
-            return "corporate_governance"
-
-        elif prefix == "4":
-            return "debt_securities"
-
-        elif prefix == "2":
-            return "merger_acquisition"
-
+        # Subsidiaries (21)
         elif prefix == "21":
             return "subsidiaries"
 
-        elif prefix in ("1", "5", "23"):
-            return "legal_compliance"
+        # Consents (23.x)
+        elif prefix == "23":
+            return "consent"
+
+        # Press releases and investor presentations (99.x)
+        elif prefix == "99":
+            return "press_or_investor"
 
         else:
             return "other"
@@ -219,10 +247,21 @@ class BaseFiling(ABC):
 
     async def _upsert_attachments_and_pages(self, filing_id: int):
         """Upserts all the attachments for a filing"""
+        # Define which attachment types should be chunked
+        CHUNKABLE_TYPES = {
+            "underwriting_agreement",
+            "merger_agreement",
+            "certificate_of_designations",
+            "indenture",
+            "supplemental_indenture",
+            "debt_instrument",
+            "press_or_investor"
+        }
+
         documents = self.filing.attachments.documents
         attachments = []
         attachment_pages = {}
-        press_release_data = []  # Collect press release data
+        chunkable_attachments = []  # Collect attachments that need chunking
 
         for document in documents:
             if not document.document_type or not document.document_type.startswith("EX-"):
@@ -259,11 +298,13 @@ class BaseFiling(ABC):
                 }
             )
 
-            if attachment_type == "press_release":
-                press_release_data.append({
+            # Collect attachments that should be chunked
+            if attachment_type in CHUNKABLE_TYPES:
+                chunkable_attachments.append({
                     "exhibit_number": exhibit_number,
                     "pages": pages,
-                    "description": document.description
+                    "description": document.description,
+                    "attachment_type": attachment_type
                 })
 
         response = await self.database.table("filing_attachments").upsert(attachments,
@@ -292,22 +333,23 @@ class BaseFiling(ABC):
                 on_conflict="attachment_id,page"
             ).execute()
 
-        if press_release_data:
-            await self._upsert_all_press_release_chunks(
-                press_release_data=press_release_data,
+        # Chunk all chunkable attachments
+        if chunkable_attachments:
+            await self._upsert_attachment_chunks(
+                chunkable_attachments=chunkable_attachments,
                 exhibit_to_attachment_id=exhibit_to_attachment_id,
                 filing_id=filing_id
             )
 
         return attachments
 
-    async def _upsert_all_press_release_chunks(
+    async def _upsert_attachment_chunks(
             self,
-            press_release_data: list,
+            chunkable_attachments: list,
             exhibit_to_attachment_id: dict,
             filing_id: int
     ):
-        """Upserts all press release chunks in a single operation"""
+        """Upserts all attachment chunks in a single operation for chunkable attachment types"""
         filing_data = {
             "form": self.filing.form,
             "filing_date": self.filing_date,
@@ -317,12 +359,12 @@ class BaseFiling(ABC):
         generator = AttachmentEmbeddingGenerator(self.company, filing_data, chunk_size=1024, chunk_overlap=0)
         all_chunks_data = []
 
-        for pr_data in press_release_data:
-            exhibit_number = pr_data["exhibit_number"]
-            pages = pr_data["pages"]
+        for attachment_data in chunkable_attachments:
+            exhibit_number = attachment_data["exhibit_number"]
+            pages = attachment_data["pages"]
             attachment_id = exhibit_to_attachment_id[exhibit_number]
-            description = pr_data["description"]
-            attachment_type = "press_release"
+            description = attachment_data["description"]
+            attachment_type = attachment_data["attachment_type"]
 
             chunks = await generator.embed(pages, attachment_type, exhibit_number, description)
 

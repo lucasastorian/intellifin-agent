@@ -8,6 +8,7 @@ from agent.message import Action, Message
 from agent.action_response import ActionResponse
 from agent.actions.base_action import BaseAction
 
+
 # TODO: Add search_mode parameter: Literal["semantic", "keyword"]
 # - semantic (default): Vector search for conceptual/natural language queries
 # - keyword: BM25 keyword search for exact terms (company names, technical terms, product names, exact phrases)
@@ -23,14 +24,6 @@ def default_start_date() -> str:
 def default_end_date() -> str:
     """Default to today"""
     return date.today().strftime('%Y-%m-%d')
-
-
-DocumentType = Literal[
-    "annual_report",  # 10-K
-    "quarterly_report",  # 10-Q
-    "current_report",  # 8-K
-    "earnings_transcript"
-]
 
 
 class SemanticSearch(BaseModel):
@@ -55,14 +48,6 @@ class SemanticSearch(BaseModel):
         min_length=5
     )
 
-    document_types: List[DocumentType] = Field(
-        description=(
-            "Filter by document type."
-            "earnings_transcript: guidance, Q&A | quarterly_report: 10-Q interim results | "
-            "annual_report: 10-K comprehensive | current_report: 8-K material events"
-        )
-    )
-
     start_date: str = Field(
         description="Start date (YYYY-MM-DD)."
     )
@@ -70,6 +55,29 @@ class SemanticSearch(BaseModel):
     end_date: str = Field(
         default_factory=default_end_date,
         description="End date (YYYY-MM-DD). Defaults to today."
+    )
+
+    document_types: List[Literal[
+        "annual_reports",
+        "quarterly_reports",
+        "current_reports",
+        "proxy_statements",
+        "earnings_transcripts",
+    ]] = Field(
+        description=(
+            "Filter by document type."
+            "earnings_transcript: guidance, Q&A | quarterly_report: 10-Q interim results | "
+            "annual_report: 10-K comprehensive | current_report: 8-K material events"
+        )
+    )
+
+    current_report_focus: Optional[List[Literal[
+        "financing_terms",  # EX-1.1, EX-3.1
+        "debt_terms",  # EX-4.1/4.2
+        "merger_terms",  # EX-2.1
+        "press_investor"  # EX-99 / 99.1 / 99.2
+    ]]] = Field(
+        description="The types of documents to focus on for current reports in particular"
     )
 
     limit: Literal[5, 10, 20] = Field(
@@ -114,7 +122,6 @@ class SemanticSearch(BaseModel):
 
 
 class SemanticSearchAction(BaseAction):
-
     name: str = 'SemanticSearch'
     schema = SemanticSearch
 
@@ -129,7 +136,10 @@ class SemanticSearchAction(BaseAction):
                 message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
             )
 
-        params = f"symbol={args.symbol}, query='{args.query}', {args.start_date} → {args.end_date}, documents={args.document_types}, limit={args.limit}"
+        params = f"symbol={args.symbol}, query='{args.query}', {args.start_date} → {args.end_date}, documents={args.document_types}"
+        if args.current_report_focus:
+            params += f", focus={args.current_report_focus}"
+        params += f", limit={args.limit}"
         self.log_start("SemanticSearch", params=params)
 
         forms = self._get_forms_for_document_types(args.document_types)
@@ -267,7 +277,7 @@ class SemanticSearchAction(BaseAction):
             return []
 
     async def _search_attachment_chunks(self, args: SemanticSearch, forms: List[str]) -> List[dict]:
-        """Vector search filing attachment chunks (press releases)"""
+        """Vector search filing attachment chunks with optional focus filtering"""
         try:
             query = (
                 self.database
@@ -282,6 +292,11 @@ class SemanticSearchAction(BaseAction):
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
             )
+
+            # Apply current_report_focus filtering if specified
+            if args.current_report_focus:
+                attachment_types = self._get_attachment_types_for_focus(args.current_report_focus)
+                query = query.in_("attachment_type", attachment_types)
 
             result = await query.vector_search(
                 args.query,
@@ -335,6 +350,7 @@ class SemanticSearchAction(BaseAction):
             'annual_report': ['10-K', '10-K/A', '20-F', '20-F/A'],
             'quarterly_report': ['10-Q', '10-Q/A'],
             'current_report': ['8-K', '8-K/A', '6-K', '6-K/A'],
+            'proxy_statements': ['DEF 14A', 'DEF 14A/A'],
         }
 
         forms = []
@@ -343,6 +359,23 @@ class SemanticSearchAction(BaseAction):
                 forms.extend(mapping[doc_type])
 
         return list(set(forms))
+
+    @staticmethod
+    def _get_attachment_types_for_focus(focus_areas: List[str]) -> List[str]:
+        """Maps current_report_focus values to attachment types"""
+        mapping = {
+            'financing_terms': ['underwriting_agreement', 'certificate_of_designations'],
+            'debt_terms': ['indenture', 'supplemental_indenture', 'debt_instrument'],
+            'merger_terms': ['merger_agreement'],
+            'press_investor': ['press_or_investor']
+        }
+
+        attachment_types = []
+        for focus in focus_areas:
+            if focus in mapping:
+                attachment_types.extend(mapping[focus])
+
+        return list(set(attachment_types))
 
     def _format_results(self, results: List[dict]) -> str:
         """Format merged results"""
@@ -396,7 +429,8 @@ class SemanticSearchAction(BaseAction):
 
         pages = r['pages']
         page_numbers = [p['page'] for p in pages]
-        page_display = f"Page {page_numbers[0]}" if len(page_numbers) == 1 else f"Pages {page_numbers[0]}-{page_numbers[-1]}"
+        page_display = f"Page {page_numbers[0]}" if len(
+            page_numbers) == 1 else f"Pages {page_numbers[0]}-{page_numbers[-1]}"
 
         content_parts = []
         for page_data in pages:
@@ -408,15 +442,16 @@ class SemanticSearchAction(BaseAction):
 
         fiscal_year = r.get('fiscal_year')
         fiscal_period = r.get('fiscal_period')
-        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
 
         score = r.get('_score', 0.0)
 
         return (
-            f"**[Excerpt #{index} | ID: {excerpt_id}] {section} ({page_display})** | Filing #{r['filing_id']}\n"
-            f"{company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
-            (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
-            f"{content}\n\n---\n"
+                f"**[Excerpt #{index} | ID: {excerpt_id}] {section} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"{company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
+                f"{content}\n\n---\n"
         )
 
     @staticmethod
@@ -435,7 +470,8 @@ class SemanticSearchAction(BaseAction):
 
         pages = r['pages']
         page_numbers = [p['page'] for p in pages]
-        page_display = f"Page {page_numbers[0]}" if len(page_numbers) == 1 else f"Pages {page_numbers[0]}-{page_numbers[-1]}"
+        page_display = f"Page {page_numbers[0]}" if len(
+            page_numbers) == 1 else f"Pages {page_numbers[0]}-{page_numbers[-1]}"
 
         content_parts = []
         for page_data in pages:
@@ -447,16 +483,17 @@ class SemanticSearchAction(BaseAction):
 
         fiscal_year = r.get('fiscal_year')
         fiscal_period = r.get('fiscal_period')
-        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (f"FY{fiscal_year}" if fiscal_year else "")
+        fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
+            f"FY{fiscal_year}" if fiscal_year else "")
 
         score = r.get('_score', 0.0)
 
         return (
-            f"**[Excerpt #{index} | ID: {excerpt_id}] {attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
-            f"{company_name} ({symbols}) | {form} | Filed: {filing_date}" +
-            (f" | {fiscal_info}" if fiscal_info else "") +
-            (f"\n{description}" if description else "") + "\n\n" +
-            f"{content}\n\n---\n"
+                f"**[Excerpt #{index} | ID: {excerpt_id}] {attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"{company_name} ({symbols}) | {form} | Filed: {filing_date}" +
+                (f" | {fiscal_info}" if fiscal_info else "") +
+                (f"\n{description}" if description else "") + "\n\n" +
+                f"{content}\n\n---\n"
         )
 
     @staticmethod

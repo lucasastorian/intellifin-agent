@@ -2,9 +2,9 @@
 import asyncio
 import re
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict
 from .mixins import PredMixin, SelectMixin
-from ..ir import SelectIR, KeywordFTS, Col
+from ..ir import SelectIR, KeywordFTS, Col, And
 from ..binder import bind_select
 from ..planner import plan_select
 from ..sqlgen import generate_select
@@ -121,8 +121,44 @@ class SelectBuilder(PredMixin, SelectMixin):
         }
         return self
 
-    async def _do_vector_search(self, query: str, column: str, topk: int, embedder, return_scores: bool):
-        """Internal: Perform the actual vector search with embedding."""
+    async def _prefetch_filter_ids(self) -> Optional[List[int]]:
+        """Prefetch IDs from current WHERE predicates for filtering vector/keyword searches.
+
+        This avoids lock contention when running parallel searches by executing the
+        prefilter query once before launching both legs.
+
+        Returns:
+            List of IDs matching current predicates, or None if no predicates set.
+        """
+        if self._pred is None:
+            return None
+
+        temp_ir = SelectIR(
+            table=self.table,
+            columns=["id"],
+            where=self._pred,
+            order=[],
+            limit=None,
+        )
+        bound = bind_select(temp_ir, self.schema)
+        planned, _ = plan_select(bound, self.schema, self.dialect)
+        sql, params = generate_select(planned, self.dialect)
+        rows = await self.db._exec(sql, params)
+        return [row['id'] for row in rows]
+
+    async def _do_vector_search(self, query: str, column: str, topk: int, embedder, return_scores: bool,
+                                filter_ids: Optional[List[int]] = None):
+        """Internal: Perform the actual vector search with embedding.
+
+        Args:
+            query: Query text to embed
+            column: Column name for vector search
+            topk: Number of results to return
+            embedder: Embedder instance
+            return_scores: Whether to return scores (deprecated, always True)
+            filter_ids: Pre-fetched IDs to filter by. If None and self._pred exists,
+                       will query for filter IDs (not recommended for parallel searches).
+        """
         if embedder is None:
             embedder = getattr(self.db, 'embedder', None)
             if embedder is None:
@@ -146,25 +182,9 @@ class SelectBuilder(PredMixin, SelectMixin):
         query_embedding = await embedder.query_vector(query)
         query_vec = np.array(query_embedding, dtype=np.float32)
 
-        # Collect any existing WHERE clause IDs for filtering
-        filter_ids = None
-        if self._pred is not None:
-            # Execute current predicates to get candidate IDs
-            temp_ir = SelectIR(
-                table=self.table,
-                columns=["id"],
-                where=self._pred,
-                order=[],
-                limit=None,
-            )
-            from ..binder import bind_select
-            from ..planner import plan_select
-            from ..sqlgen import generate_select
-            bound = bind_select(temp_ir, self.schema)
-            planned, _ = plan_select(bound, self.schema, self.dialect)
-            sql, params = generate_select(planned, self.dialect)
-            rows = await self.db._exec(sql, params)
-            filter_ids = [row['id'] for row in rows]
+        # Use provided filter_ids or query for them if not provided (backward compat)
+        if filter_ids is None and self._pred is not None:
+            filter_ids = await self._prefetch_filter_ids()
 
         # Search vector store
         ids, scores = vector_store.search(query_vec, topk=topk, filter_ids=filter_ids)
@@ -193,6 +213,65 @@ class SelectBuilder(PredMixin, SelectMixin):
             )
             # order_by expects list of tuples: (expression, desc_bool)
             self.order_by = [(f"CASE id {order_cases} END", False)]  # False = ASC
+
+    async def _do_keyword_search(self, query: str, column: str, topk: int) -> Tuple[List[int], Dict[int, float]]:
+        """Internal: Perform keyword search and return (ids, scores).
+
+        Scores are negated BM25 values (higher=better) for normalization.
+        Falls back to rank-only pseudo-scores if BM25 unavailable.
+
+        Args:
+            query: FTS query string (already tokenized/normalized)
+            column: Column to search
+            topk: Number of results to return
+
+        Returns:
+            Tuple of (ids, scores_dict) where scores are higher-is-better.
+
+        Note:
+            Respects existing predicates by combining them with FTS via AND.
+            Example: .contains("company_symbols", "AAPL")._do_keyword_search(...)
+            will search only within AAPL documents.
+        """
+        # Combine existing predicates with FTS predicate
+        base_pred = self._pred
+        fts_pred = KeywordFTS(Col(column), query)
+        where_pred = fts_pred if base_pred is None else And([base_pred, fts_pred])
+
+        # Build minimal IR that projects id + _rank
+        ir = SelectIR(
+            table=self.table,
+            columns=["id"],
+            where=where_pred,
+            order=[],  # Let FTS default order apply (rank ASC)
+            limit=topk,
+        )
+
+        # Bind, plan, generate
+        bound = bind_select(ir, self.schema)
+        planned, _ = plan_select(bound, self.schema, self.dialect)
+        sql, params = generate_select(planned, self.dialect)
+
+        # Execute
+        rows = await self.db._exec(sql, params)
+
+        ids = [r["id"] for r in rows]
+
+        # Extract scores (planner adds _rank column if FTS is present)
+        if rows and "_rank" in rows[0]:
+            # BM25 is lower-is-better → negate for higher-is-better
+            scores = {r["id"]: -float(r["_rank"]) for r in rows}
+        else:
+            # Fallback: rank-only pseudo-scores (descending by position)
+            n = len(ids)
+            if n == 0:
+                scores = {}
+            elif n == 1:
+                scores = {ids[0]: 1.0}
+            else:
+                scores = {id_: 1.0 - (idx / (n - 1)) for idx, id_ in enumerate(ids)}
+
+        return ids, scores
 
     async def count(self) -> int:
         """Execute COUNT(*) query and return the integer count directly."""

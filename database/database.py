@@ -51,6 +51,9 @@ class Database:
                 return 0
         self.conn.create_function("REGEXP", 2, _sqlite_regexp)
 
+        # Check BM25 availability for FTS5 ranking
+        self._has_bm25 = self._check_bm25_support()
+
         self.conn.execute("PRAGMA foreign_keys = ON;")
         self.conn.execute("PRAGMA journal_mode = WAL;")
         self.conn.execute("PRAGMA synchronous = NORMAL;")
@@ -126,6 +129,35 @@ class Database:
             # CREATE VIRTUAL TABLE IF NOT EXISTS and CREATE TRIGGER IF NOT EXISTS are idempotent
             self.conn.executescript(fts_sql)
         self.conn.commit()
+
+    def _check_bm25_support(self) -> bool:
+        """Check if SQLite FTS5 bm25() function is available.
+
+        Some SQLite builds may not expose the bm25() function.
+        Falls back to 'rank' or rank-only pseudo-scores if unavailable.
+
+        Returns:
+            True if bm25() is available, False otherwise.
+        """
+        try:
+            # Create a temporary FTS5 table to test bm25()
+            self.conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _bm25_test USING fts5(content);")
+            self.conn.execute("INSERT INTO _bm25_test(rowid, content) VALUES (1, 'test');")
+            # Try to use bm25()
+            self.conn.execute("SELECT bm25(_bm25_test) FROM _bm25_test WHERE _bm25_test MATCH 'test';").fetchone()
+            # Clean up
+            self.conn.execute("DROP TABLE _bm25_test;")
+            self.conn.commit()
+            return True
+        except sqlite3.OperationalError:
+            # bm25() not available - will use rank or pseudo-scores
+            try:
+                # Clean up test table if it was created
+                self.conn.execute("DROP TABLE IF EXISTS _bm25_test;")
+                self.conn.commit()
+            except Exception:
+                pass
+            return False
 
     def _init_vector_stores(self):
         """Initialize vector stores registry (created on-demand)"""

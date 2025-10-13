@@ -1,21 +1,26 @@
+from typing import List
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
+from pipeline.enrichment.section_embedding_generator import SectionEmbeddingGenerator
 
 
 class FilingDefFourteenA(BaseFiling):
 
     async def upsert(self):
-        """Upserts the DEF 14A filing"""
+        """Upserts the DEF 14A filing and chunks the proxy statement content"""
         xbrl = await self._load_xbrl()
 
-        filing_id = await self._upsert_filing(xbrl=xbrl)
-        pages = await self._upsert_filing_pages(filing_id=filing_id)
+        filing = await self._upsert_filing(xbrl=xbrl)
+        pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        await self._update_filing_counts(num_pages=len(pages), num_attachments=0, filing_id=filing_id)
-        await self._mark_synced(filing_id=filing_id)
+        # Chunk the proxy statement content
+        await self._upsert_filing_chunks(pages=pages, filing=filing)
 
-    async def _upsert_filing(self, xbrl: XBRL) -> int:
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=0, filing_id=filing['id'])
+        await self._mark_synced(filing_id=filing['id'])
+
+    async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""
         response = await self.database.table("filings").upsert({
             "form": self.filing.form,
@@ -26,4 +31,12 @@ class FilingDefFourteenA(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response.data[0]['id']
+        return response.data[0]
+
+    async def _upsert_filing_chunks(self, pages: List[dict], filing: dict):
+        """Chunk the entire proxy statement and save in filing_section_chunks"""
+        generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
+
+        # Chunk all pages (no cover page to exclude for proxy statements)
+        await generator.embed(section_type="proxy_statement", pages=pages,
+                              fiscal_period=filing.get("fiscal_period"), fiscal_year=filing.get("fiscal_year"))

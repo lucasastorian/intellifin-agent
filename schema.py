@@ -189,8 +189,9 @@ class FilingSectionChunks(Table):
         "controls_procedures",  # 10-K Item 9A / 10-Q Part I Item 4
         "other_information",  # 10-K Item 9B
         "unregistered_sales_equity",  # 10-Q Part II Item 2 (buybacks, private placements)
-        "other"  # fallback (store raw heading)
-        "current_report"  # Includes the raw content of a current report filing (excluding cover page)
+        "other",  # fallback (store raw heading)
+        "current_report",  # Includes the raw content of a current report filing (excluding cover page)
+        "proxy_statement"  # Includes the content of a DEF 14A proxy statement
     ], nullable=False, index=True)
 
     index = Integer(nullable=False)
@@ -371,9 +372,30 @@ class FilingAttachments(Table):
     filename = Text(nullable=False)
     description = Text(nullable=True)
     num_pages = Integer(nullable=True)
-    type = Enum(
-        choices=['press_release', 'material_contract', 'corporate_governance', 'debt_securities',
-                 'merger_acquisition', 'subsidiaries', 'legal_compliance', 'other'],
+    # type = Enum(
+    #     choices=['press_release', 'material_contract', 'corporate_governance', 'debt_securities',
+    #              'merger_acquisition', 'subsidiaries', 'legal_compliance', 'other'],
+    #     nullable=False,
+    #     default='other',
+    #     index=True
+    # )
+    type = Enum(  # inferred from number only
+        choices=[
+            'underwriting_agreement',  # 1.1 or 1.x
+            'merger_agreement',  # 2.1
+            'certificate_of_designations',  # 3.1
+            'charter',  # other 3.x charter updates
+            'bylaws',  # 3.2
+            'indenture',  # 4.1
+            'supplemental_indenture',  # 4.2
+            'debt_instrument',  # other 4.x (notes, warrants)
+            'material_contract',  # 10.x (coarse)
+            'press_or_investor',  # unknown 99.x
+            'subsidiaries',  # 21
+            'legal_opinion',  # 5.x
+            'consent',  # 23.x
+            'other'
+        ],
         nullable=False,
         default='other',
         index=True
