@@ -14,7 +14,6 @@ class FilingDefFourteenA(BaseFiling):
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        # Chunk the proxy statement content
         await self._upsert_filing_chunks(pages=pages, filing=filing)
 
         await self._update_filing_counts(num_pages=len(pages), num_attachments=0, filing_id=filing['id'])
@@ -37,6 +36,28 @@ class FilingDefFourteenA(BaseFiling):
         """Chunk the entire proxy statement and save in filing_section_chunks"""
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
-        # Chunk all pages (no cover page to exclude for proxy statements)
-        await generator.embed(section_type="proxy_statement", pages=pages,
-                              fiscal_period=filing.get("fiscal_period"), fiscal_year=filing.get("fiscal_year"))
+        chunks = await generator.embed(
+            section_type="proxy_statement",
+            pages=pages,
+            fiscal_period=filing.get("fiscal_period"),
+            fiscal_year=filing.get("fiscal_year")
+        )
+
+        all_chunks = []
+        for i, chunk in enumerate(chunks):
+            all_chunks.append({
+                "index": i,
+                "section": "proxy_statement",
+                "page": chunk.page,
+                "pages": chunk.pages,
+                "embedding": chunk.embedding_text,
+                "has_table": chunk.has_table,
+                "filing_id": filing['id'],
+                "company_id": self.company_id
+            })
+
+        if all_chunks:
+            await self.database.table("filing_section_chunks").upsert(
+                all_chunks,
+                on_conflict="filing_id,section,index"
+            ).execute()

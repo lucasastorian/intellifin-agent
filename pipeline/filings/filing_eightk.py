@@ -53,9 +53,31 @@ class FilingEightK(BaseFiling):
         """For a current report, we embed the pages (excluding the cover page) and save in filing_section_chunks"""
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
-        # NOTE: Using the section embedding generator here is questionable...
-        await generator.embed(section_type="current_report", pages=pages[1:],
-                              fiscal_period=filing.get("fiscal_period"), fiscal_year=filing.get("fiscal_year"))
+        chunks = await generator.embed(
+            section_type="current_report",
+            pages=pages[1:],
+            fiscal_period=filing.get("fiscal_period"),
+            fiscal_year=filing.get("fiscal_year")
+        )
+
+        all_chunks = []
+        for i, chunk in enumerate(chunks):
+            all_chunks.append({
+                "index": i,
+                "section": "current_report",
+                "page": chunk.page,
+                "pages": chunk.pages,
+                "embedding": chunk.embedding_text,
+                "has_table": chunk.has_table,
+                "filing_id": filing['id'],
+                "company_id": self.company_id
+            })
+
+        if all_chunks:
+            await self.database.table("filing_section_chunks").upsert(
+                all_chunks,
+                on_conflict="filing_id,section,index"
+            ).execute()
 
     #
     # async def _enrich_filing(self, filing: dict, pages: List[Dict], enriched_attachments: List[Dict]):

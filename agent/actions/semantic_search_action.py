@@ -347,9 +347,9 @@ class SemanticSearchAction(BaseAction):
     def _get_forms_for_document_types(document_types: List[str]) -> List[str]:
         """Maps document types to SEC forms"""
         mapping = {
-            'annual_report': ['10-K', '10-K/A', '20-F', '20-F/A'],
-            'quarterly_report': ['10-Q', '10-Q/A'],
-            'current_report': ['8-K', '8-K/A', '6-K', '6-K/A'],
+            'annual_reports': ['10-K', '10-K/A', '20-F', '20-F/A'],
+            'quarterly_reports': ['10-Q', '10-Q/A'],
+            'current_reports': ['8-K', '8-K/A', '6-K', '6-K/A'],
             'proxy_statements': ['DEF 14A', 'DEF 14A/A'],
         }
 
