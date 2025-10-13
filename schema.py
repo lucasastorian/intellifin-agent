@@ -426,6 +426,42 @@ class FilingAttachmentChunks(Table):
     __uniques__ = [("attachment_id", "index")]
 
 
+class EarningsTranscripts(Table):
+    __tablename__ = "earnings_transcripts"
+
+    id = Serial()
+    fiscal_year: Integer(nullable=False)
+    fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=False)
+
+    sections: JSONField(nullable=False)  # A list of formatted JSON sections
+
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("company_id", "fiscal_year", "fiscal_period")]
+
+
+class EarningsTranscriptChunks(Table):
+    __tablename__ = "earnings_transcripts"
+
+    id = Serial()
+
+    index: Integer(nullable=False)
+
+    sections: JSONField(nullable=False)
+    embedding: Text(nullable=False, fts=True, vector=True)
+
+    transcript_id = Integer(nullable=False, foreign_key="earnings_transcripts.id", on_delete="CASCADE", index=True)
+    company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
+
+    created_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP")
+    updated_at = Timestamp(nullable=False, default="CURRENT_TIMESTAMP", auto_update=True)
+
+    __uniques__ = [("transcript_id", "index")]
+
+
 class CompanyFilingAttachments(View):
     __viewname__ = "company_filing_attachments"
     __tables__ = (FilingAttachments, Filings, Companies)

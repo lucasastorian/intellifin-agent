@@ -1,4 +1,3 @@
-import asyncio
 from typing import List, Dict
 from edgar.xbrl import XBRL
 
@@ -20,8 +19,13 @@ class FilingSixK(BaseFiling):
 
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
-        await self._enrich_filing(filing, pages)
+        attachment_data = await self._upsert_attachments(filing_id=filing['id'])
+
+        enriched_attachments = await self._enrich_attachments(attachment_data, filing)
+        await self._enrich_filing(filing, pages, enriched_attachments)
         await self._update_filing_counts(filing_id=filing['id'])
+
+        # TODO: Chunk the filing, excluding the cover page + signature page?
         await self._mark_synced()
 
     async def _upsert_filing(self, xbrl: XBRL) -> dict:
@@ -37,18 +41,15 @@ class FilingSixK(BaseFiling):
 
         return response.data[0]
 
-    async def _enrich_filing(self, filing: dict, pages: List[Dict]):
-        """Generate LLM summary for the 6-K filing (typically no attachments)"""
-        # Build header
+    async def _enrich_filing(self, filing: dict, pages: List[Dict], enriched_attachments: List[Dict]):
+        """Generate LLM summary for the 6-K filing using attachment summaries + filing content"""
         header = self.filing_summarizer.build_header(self.company, filing)
 
-        # Get first 10 pages
         first_pages = pages[:10]
 
-        # Generate filing summary (no attachments for 6-K)
         result = await self.filing_summarizer.summarize(
             pages=first_pages,
-            attachment_summaries=[],
+            attachment_summaries=enriched_attachments,
             header=header
         )
 

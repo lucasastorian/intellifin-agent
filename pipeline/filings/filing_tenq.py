@@ -4,7 +4,6 @@ from typing import Optional, List, Literal, Dict
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
-from pipeline.parsers.parser import Parser
 from pipeline.parsers.section_extractor import SectionExtractor
 from pipeline.enrichment.section_embedding_generator import SectionEmbeddingGenerator
 
@@ -20,18 +19,17 @@ class FilingTenQ(BaseFiling):
         if xbrl is None:
             logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
-        filing_id = await self._upsert_filing(xbrl=xbrl)
-        filing = (await self.database.table("filings").select("*").eq("id", filing_id).execute()).data[0]
-        pages = await self._upsert_filing_pages(filing_id=filing_id)
-        await self._upsert_filing_notes(filing_id=filing_id, filing=filing)
-        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing_id)
-        attachment_data = await self._upsert_attachments(filing_id=filing_id)
-        await self._upsert_filing_chunks(pages=pages, filing_id=filing_id)
-        await self._enrich_attachments(attachment_data, filing)
-        await self._update_filing_counts(filing_id=filing_id)
+        filing = await self._upsert_filing(xbrl=xbrl)
+        pages = await self._upsert_filing_pages(filing_id=filing['id'])
+        await self._upsert_filing_notes(filing_id=filing['id'], filing=filing)
+        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
+        attachment_data = await self._upsert_attachments(filing_id=filing['id'])
+        await self._upsert_filing_chunks(pages=pages, filing=filing)
+        await self._enrich_attachments(attachment_data, filing=filing)
+        await self._update_filing_counts(filing_id=filing['id'])
         await self._mark_synced()
 
-    async def _upsert_filing(self, xbrl: Optional[XBRL]) -> int:
+    async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:
         """Creates a filing record"""
         fiscal_year = xbrl.entity_info['fiscal_year'] if xbrl else None
         fiscal_period = xbrl.entity_info['fiscal_period'] if xbrl else None
@@ -47,7 +45,7 @@ class FilingTenQ(BaseFiling):
             "company_id": self.company_id
         }, on_conflict="accession_number").execute()
 
-        return response.data[0]['id']
+        return response.data[0]
 
     async def _upsert_attachments(self, filing_id: int) -> List[Dict]:
         """Upserts material attachments (exhibits) for 10-Q filings"""
@@ -101,19 +99,18 @@ class FilingTenQ(BaseFiling):
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int):
+    async def _upsert_filing_chunks(self, pages: List[dict], filing: dict):
         """Chunks the filing pages and upserts them"""
-        filing_record = (await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq("id", filing_id).execute()).data[0]
-        fiscal_year = filing_record.get('fiscal_year')
-        fiscal_period = filing_record.get('fiscal_period')
+        fiscal_year = filing.get('fiscal_year')
+        fiscal_period = fiscal_year.get('fiscal_period')
 
         # Create embedding generator with company and filing context
-        generator = SectionEmbeddingGenerator(self.company, filing_record)
+        generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
         extractor = SectionExtractor(pages=pages, filing_type="10-Q")
         sections = extractor.get_sections()
 
-        await self._upsert_filing_section_pages(sections, filing_id)
+        await self._upsert_filing_section_pages(sections, filing_id=filing['id'])
 
         all_chunks = []
 
@@ -152,10 +149,10 @@ class FilingTenQ(BaseFiling):
                         "pages": chunk.pages,
                         "embedding": chunk.embedding_text,  # Uses header + content
                         "has_table": chunk.has_table,
-                        "filing_id": filing_id,
+                        "filing_id": filing['id'],
                         "company_id": self.company_id
                     })
 
         if all_chunks:
             await self.database.table("filing_section_chunks").upsert(all_chunks,
-                                                                on_conflict="filing_id,section,index").execute()
+                                                                      on_conflict="filing_id,section,index").execute()

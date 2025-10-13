@@ -6,52 +6,36 @@ from pipeline.chunker.markdown_chunker import MarkdownChunker
 class BaseEmbeddingGenerator(ABC):
     """Base class for embedding generators with shared header building logic"""
 
-    def __init__(self, company: dict, filing: dict):
+    def __init__(self, company: dict, filing: dict, chunk_size: int = 512, chunk_overlap: int = 128):
         self.company = company
         self.filing = filing
-        self.chunker = MarkdownChunker()
+        self.chunker = MarkdownChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     def _build_company_header(self) -> str:
         """Build company name and ticker header"""
-        name = self.company.get('name')
+        name = self.company.get('name', '')
         symbols = self.company.get('symbols', [])
         exchanges = self.company.get('exchanges', [])
         ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
 
-        if name:
-            return f"# {name}{f' ({ticker})' if ticker else ''}"
-        return ""
+        return f"# {name}{f' ({ticker})' if ticker else ''}" if name else ""
 
     def _build_sector_industry(self) -> str:
         """Build sector and industry line"""
-        sector = self.company.get('sector')
-        industry = self.company.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            return " | ".join(filter(None, [sector_str, industry_str]))
-        return ""
+        sector = self.company.get('sector', '')
+        industry = self.company.get('industry', '')
+
+        return f"{f'Sector: {sector}' if sector else ''}{' | ' if sector and industry else ''}{f'Industry: {industry}' if industry else ''}" if sector or industry else ""
 
     def _build_filing_metadata(self, fiscal_year: int = None, fiscal_period: str = None) -> str:
         """Build filing metadata line"""
-        form = self.filing.get('form')
-        filing_date = self.filing.get('filing_date')
-        report_date = self.filing.get('report_date')
+        form = self.filing.get('form', '')
+        filing_date = self.filing.get('filing_date', '')
+        report_date = self.filing.get('report_date', '')
 
-        filing_parts = []
-        if form:
-            filing_parts.append(f"Form {form}")
-        if fiscal_year:
-            period_str = f"FY {fiscal_year}"
-            if fiscal_period and fiscal_period != 'FY':
-                period_str += f" {fiscal_period}"
-            filing_parts.append(period_str)
-        if filing_date:
-            filing_parts.append(f"Filed: {filing_date}")
-        if report_date:
-            filing_parts.append(f"Period Ending: {report_date}")
+        period_str = f"FY {fiscal_year}{f' {fiscal_period}' if fiscal_period and fiscal_period != 'FY' else ''}" if fiscal_year else ""
 
-        return " | ".join(filing_parts) if filing_parts else ""
+        return f"{f'Form {form}' if form else ''}{f' | {period_str}' if period_str else ''}{f' | Filed: {filing_date}' if filing_date else ''}{f' | Period Ending: {report_date}' if report_date else ''}"
 
     @abstractmethod
     def _build_context_specific_header(self, **kwargs) -> str:

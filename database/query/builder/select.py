@@ -28,7 +28,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         self.order_by = []
         self.limit_n = None
 
-    def keyword_search(self, query: str, column: str):
+    def keyword_search(self, query: str, column: str, limit: int = 50):
         """Build an FTS5 MATCH query for BM25 ranking.
 
         Uses OR logic with prefix matching for maximum recall.
@@ -37,6 +37,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         Args:
             query: Search query string
             column: Column to search
+            limit: Maximum number of results to return (default: 50)
         """
         # Normalize: split at letter-digit boundaries, quote hyphenated words
         tokens = []
@@ -65,9 +66,10 @@ class SelectBuilder(PredMixin, SelectMixin):
 
         self._and(KeywordFTS(Col(column), fts_query))
         self.order_by = []
+        self.limit(limit)
         return self
 
-    def fts(self, query: str, column: str):
+    def fts(self, query: str, column: str, limit: int = 50):
         """Build an FTS5 MATCH query for exact phrase matching.
 
         Wraps the query in double quotes for exact phrase matching.
@@ -76,6 +78,7 @@ class SelectBuilder(PredMixin, SelectMixin):
         Args:
             query: Exact phrase to search for
             column: Column to search
+            limit: Maximum number of results to return (default: 50)
         """
         # Escape internal quotes and wrap in quotes for exact phrase match
         escaped_query = query.strip().replace('"', '""')
@@ -83,6 +86,7 @@ class SelectBuilder(PredMixin, SelectMixin):
 
         self._and(KeywordFTS(Col(column), fts_query))
         self.order_by = []
+        self.limit(limit)
         return self
 
     def vector_search(self, query: str, column: str, topk: int = 50, embedder=None, return_scores: bool = False):

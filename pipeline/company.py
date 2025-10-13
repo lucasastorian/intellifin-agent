@@ -1,7 +1,10 @@
+import os
+import aiohttp
 import asyncio
-from typing import List, Optional
 from datetime import date
 from tqdm.asyncio import tqdm
+from typing import List, Optional
+
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
 
@@ -13,6 +16,7 @@ from pipeline.filings.filing_eightk import FilingEightK
 from pipeline.filings.filing_deffourteena import FilingDefFourteenA
 from pipeline.filings.filing_sixk import FilingSixK
 from pipeline.filings.filing_twentyf import FilingTwentyF
+from pipeline.transcripts.transcript import Transcript
 
 
 class Company:
@@ -21,7 +25,7 @@ class Company:
                         "20-F", "6-K"]
 
     def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
-                 end_year: int = 2026):
+                 end_year: int = 2027):
         self.symbol = symbol
         self.database = database
         self.start_year = start_year
@@ -31,7 +35,7 @@ class Company:
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
     async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-                     end_date: Optional[str] = None) -> int:
+                     end_date: Optional[str] = None, include_earnings_transcripts: bool = False) -> int:
         if self.company.not_found:
             return 0
 
@@ -40,7 +44,7 @@ class Company:
             return 0
 
         synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
-                                                   end_date=end_date)
+                                                  end_date=end_date)
         await self.on_sync_complete(company_id=company['id'])
 
         return synced_count
@@ -80,7 +84,8 @@ class Company:
         return synced
 
     async def _get_company(self) -> Optional[dict]:
-        response = await self.database.table("companies").select("id").contains("symbols", self.symbol).limit(1).execute()
+        response = await self.database.table("companies").select("id").contains("symbols", self.symbol).limit(
+            1).execute()
 
         if not response.data:
             return None
@@ -146,3 +151,55 @@ class Company:
 
         else:
             raise ValueError(f"Did not recognize form {filing.form}")
+
+    async def _sync_transcripts(self, company: dict):
+        """Syncs all the earnings transcripts for the given date range"""
+        # NOTE: We need a way to ONLY sync transcripts the first time
+        tasks = []
+        transcript_data = await self._load_transcripts()
+        for data in transcript_data:
+            tasks.append(self._upsert_transcript(data=data, company=company))
+
+        await asyncio.gather(**tasks)
+
+    async def _upsert_transcript(self, data: dict, company: dict):
+        """Upserts a single transcript"""
+        transcript = Transcript(content=data['content'], fiscal_year=data['year'], fiscal_quarter=data['quarter'],
+                                date=date['date'], company=company, database=self.database)
+        return await transcript.upsert()
+
+    async def _load_transcripts(self):
+        """Loads transcripts via the FMP API"""
+        if not os.environ.get("FMP_API_KEY"):
+            return
+
+        tasks = []
+
+        async with aiohttp.ClientSession() as session:
+            for fiscal_year in range(self.start_year, self.end_year):
+                tasks.append(self._load_transcript_batch(fiscal_year=fiscal_year, session=session))
+
+        transcript_data = await asyncio.gather(**tasks)
+
+        return transcript_data
+
+    async def _load_transcript_batch(self, fiscal_year: int, session: aiohttp.ClientSession) -> List[dict]:
+        """Loads a batch of transcripts for a given fiscal year"""
+        params = {"apikey": os.environ['FMP_API_KEY'], "year": f"{fiscal_year}"}
+        async with session.get(f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
+                               params=params) as response:
+
+            data = await response.json()
+
+            return data
+
+    async def _load_transcript_dates(self, session: aiohttp.ClientSession):
+        """Loads all the dates for a given transcript"""
+        params = {"apikey": os.environ['FMP_API_KEY'], "symbol": self.symbol}
+
+        async with session.get(f"https://financialmodelingprep.com/stable/earning-call-transcript-dates", params=params) as response:
+            data = await response.json()
+
+            # return a List[dict] with keys quarter, fiscalYear, and date (YYYY-MM-DD) for ALL available earnings transcripts for the given symbol
+            return data
+

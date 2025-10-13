@@ -19,40 +19,24 @@ class NotePreviewGenerator:
     @staticmethod
     def build_header(company_data: dict, filing_data: dict) -> str:
         """Build context header for LLM prompt"""
-        parts = []
-
-        name = company_data.get('name')
+        name = company_data.get('name', '')
         symbols = company_data.get('symbols', [])
         exchanges = company_data.get('exchanges', [])
         ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
 
-        if name:
-            parts.append(f"Company: {name}{f' ({ticker})' if ticker else ''}")
+        sector = company_data.get('sector', '')
+        industry = company_data.get('industry', '')
 
-        sector = company_data.get('sector')
-        industry = company_data.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
-
-        form = filing_data.get('form')
-        filing_date = filing_data.get('filing_date')
+        form = filing_data.get('form', '')
+        filing_date = filing_data.get('filing_date', '')
         fiscal_year = filing_data.get('fiscal_year')
-        fiscal_period = filing_data.get('fiscal_period')
+        fiscal_period = filing_data.get('fiscal_period', '')
 
-        if form:
-            filing_parts = [f"Form: {form}"]
-            if fiscal_year:
-                period_str = f"FY {fiscal_year}"
-                if fiscal_period and fiscal_period != 'FY':
-                    period_str += f" {fiscal_period}"
-                filing_parts.append(period_str)
-            if filing_date:
-                filing_parts.append(f"Filed: {filing_date}")
-            parts.append(" | ".join(filing_parts))
+        period_str = f"FY {fiscal_year}{f' {fiscal_period}' if fiscal_period and fiscal_period != 'FY' else ''}" if fiscal_year else ""
 
-        return "\n".join(parts)
+        return f"""Company: {name}{f' ({ticker})' if ticker else ''}
+{f'Sector: {sector}' if sector else ''}{' | ' if sector and industry else ''}{f'Industry: {industry}' if industry else ''}
+Form: {form}{f' | {period_str}' if period_str else ''}{f' | Filed: {filing_date}' if filing_date else ''}"""
 
     async def generate(self, note_title: str, note_content: str, company_data: dict, filing_data: dict) -> str:
         """

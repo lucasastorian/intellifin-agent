@@ -40,33 +40,19 @@ class AttachmentSummarizer:
     @staticmethod
     def build_header(company_data: dict, filing_data: dict) -> str:
         """Build context header for LLM prompt"""
-        parts = []
-
-        name = company_data.get('name')
+        name = company_data.get('name', '')
         symbols = company_data.get('symbols', [])
         exchanges = company_data.get('exchanges', [])
         ticker = f"{symbols[0]} - {exchanges[0]}" if symbols and exchanges else symbols[0] if symbols else ""
 
-        if name:
-            parts.append(f"Company: {name}{f' ({ticker})' if ticker else ''}")
+        sector = company_data.get('sector', '')
+        industry = company_data.get('industry', '')
 
-        sector = company_data.get('sector')
-        industry = company_data.get('industry')
-        if sector or industry:
-            sector_str = f"Sector: {sector}" if sector else ""
-            industry_str = f"Industry: {industry}" if industry else ""
-            parts.append(" | ".join(filter(None, [sector_str, industry_str])))
+        form = filing_data.get('form', '')
+        filing_date = filing_data.get('filing_date', '')
+        items = filing_data.get('items', [])
+        items_str = ', '.join(items) if items else ''
 
-        form = filing_data.get('form')
-        filing_date = filing_data.get('filing_date')
-        items = filing_data.get('items')
-
-        if form:
-            filing_parts = [f"Form: {form}"]
-            if filing_date:
-                filing_parts.append(f"Filed: {filing_date}")
-            if items:
-                filing_parts.append(f"Items: {', '.join(items)}")
-            parts.append(" | ".join(filing_parts))
-
-        return "\n".join(parts)
+        return f"""Company: {name}{f' ({ticker})' if ticker else ''}
+{f'Sector: {sector}' if sector else ''}{' | ' if sector and industry else ''}{f'Industry: {industry}' if industry else ''}
+Form: {form}{f' | Filed: {filing_date}' if filing_date else ''}{f' | Items: {items_str}' if items_str else ''}"""

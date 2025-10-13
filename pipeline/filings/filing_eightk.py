@@ -28,6 +28,8 @@ class FilingEightK(BaseFiling):
         await self._update_filing_counts(filing_id=filing['id'])
         await self._mark_synced()
 
+        # TODO: Chunk the filing - excluding the first and last pages (cover + signature)
+
     async def _upsert_filing(self, xbrl: XBRL) -> dict:
         """Creates a filing record"""
         response = await self.database.table("filings").upsert({

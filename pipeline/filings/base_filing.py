@@ -160,8 +160,7 @@ class BaseFiling(ABC):
             await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq(
                 "id", filing_id).execute()).data[0]
 
-        # Create embedding generator with company and filing context
-        generator = NoteEmbeddingGenerator(self.company, filing_data)
+        generator = NoteEmbeddingGenerator(self.company, filing_data, chunk_size=2048, chunk_overlap=0)
 
         all_chunks = []
 

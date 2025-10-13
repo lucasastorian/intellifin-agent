@@ -98,22 +98,19 @@ class FilingTenK(BaseFiling):
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    async def _upsert_filing_chunks(self, pages: List[dict], filing_id: int,
+    async def _upsert_filing_chunks(self, pages: List[dict], filing: dict,
                                     filing_type: Literal['10-K', '10-Q', '20-F']):
         """Chunks the filing pages and upserts them"""
-        filing_record = (
-            await self.database.table("filings").select("form,fiscal_year,fiscal_period,filing_date,report_date").eq(
-                "id", filing_id).execute()).data[0]
-        fiscal_year = filing_record.get('fiscal_year')
-        fiscal_period = filing_record.get('fiscal_period')
+        fiscal_year = filing.get('fiscal_year')
+        fiscal_period = filing.get('fiscal_period')
 
         # Create embedding generator with company and filing context
-        generator = SectionEmbeddingGenerator(self.company, filing_record)
+        generator = SectionEmbeddingGenerator(self.company, filing, chunk_size=1024, chunk_overlap=0)
 
         extractor = SectionExtractor(pages=pages, filing_type=filing_type)
         sections = extractor.get_sections()
 
-        await self._upsert_filing_section_pages(sections, filing_id)
+        await self._upsert_filing_section_pages(sections=sections, filing_id=filing['id'])
 
         all_chunks = []
 
@@ -126,7 +123,7 @@ class FilingTenK(BaseFiling):
                     "ITEM 2": "properties",
                     "ITEM 3": "legal_proceedings",
                     "ITEM 5": "market_equity_matters",
-                    "ITEM 6": "selected_financial_data",
+                    "ITEM 6": "selected_financial_data", # Deprecated as of 2021. [RESERVED].
                     "ITEM 7": "md&a",
                     "ITEM 7A": "market_risk",
                     "ITEM 9A": "controls_procedures",
