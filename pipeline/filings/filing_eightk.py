@@ -23,9 +23,11 @@ class FilingEightK(BaseFiling):
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
         # NOTE: chunking filing + press release missing here !
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
+        filing_chunks_task = self._upsert_filing_chunks(pages=pages, filing=filing)
 
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        attachments_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+
+        _, attachment_data = await asyncio.gather(filing_chunks_task, attachments_task)
 
         # Metadata update + sync complete
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

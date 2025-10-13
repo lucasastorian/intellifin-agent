@@ -88,7 +88,7 @@ class Company:
         return synced
 
     async def _get_company(self) -> Optional[dict]:
-        response = await self.database.table("companies").select("id").contains("symbols", self.symbol).limit(
+        response = await self.database.table("companies").select("id,name,symbols,sector,industry").contains("symbols", self.symbol).limit(
             1).execute()
 
         if not response.data:

@@ -431,6 +431,7 @@ class EarningsTranscripts(Table):
     __tablename__ = "earnings_transcripts"
 
     id = Serial()
+    date = Timestamp(nullable=True)
     fiscal_year = Integer(nullable=False)
     fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=False)
 

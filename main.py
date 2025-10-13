@@ -38,7 +38,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''How has US Steel addressed its planned merger with Nippon Steel and its effect on its business operations?''')
+                        default='''I need you to test whether earnings transcript search is working... Search for Capex guidance by Amazon for example... ''')
     parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='minimal',

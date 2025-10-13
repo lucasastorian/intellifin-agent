@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from edgar.xbrl import XBRL
 from typing import Optional, List, Literal, Dict
@@ -24,17 +25,19 @@ class FilingTenK(BaseFiling):
 
         # Core filing sections + upsert section chunks
         sections = await self._upsert_filing_section_pages(pages=pages, filing=filing, filing_type='10-K')
-        await self._upsert_filing_section_chunks(sections=sections, filing=filing)
+        section_chunk_task = self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
         # Financial Statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
         # Filing notes and filing note chunks
         note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        filing_note_chunk_task = self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
         # Upsert attachments
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        attachment_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+
+        _, _, attachment_data = await asyncio.gather(section_chunk_task, filing_note_chunk_task, attachment_task)
 
         # Metadata updates + mark filing as synced
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

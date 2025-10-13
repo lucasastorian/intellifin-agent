@@ -8,6 +8,12 @@ from agent.message import Action, Message
 from agent.action_response import ActionResponse
 from agent.actions.base_action import BaseAction
 
+# TODO: Add search_mode parameter: Literal["semantic", "keyword"]
+# - semantic (default): Vector search for conceptual/natural language queries
+# - keyword: BM25 keyword search for exact terms (company names, technical terms, product names, exact phrases)
+# Implementation: Add search_mode to SemanticSearch schema, conditionally use .keyword_search() vs .vector_search()
+# Use cases for keyword: "Taiwan Semiconductor", "ASC 606", "material weakness", specific company/product names
+
 
 def default_start_date() -> str:
     """Default to 1 year ago"""
@@ -123,15 +129,17 @@ class SemanticSearchAction(BaseAction):
                 message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
             )
 
-        params = f"symbol={args.symbol}, documents={args.document_types}, limit={args.limit}"
+        params = f"symbol={args.symbol}, query='{args.query}', {args.start_date} → {args.end_date}, documents={args.document_types}, limit={args.limit}"
         self.log_start("SemanticSearch", params=params)
 
         forms = self._get_forms_for_document_types(args.document_types)
+        include_transcripts = "earnings_transcript" in args.document_types
         not_found = await self.sync_symbols(
             symbols=[args.symbol],
             forms=forms,
             start_date=args.start_date,
-            end_date=args.end_date
+            end_date=args.end_date,
+            include_earnings_transcripts=include_transcripts
         )
 
         if not_found:

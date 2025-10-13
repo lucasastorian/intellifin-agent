@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional, List
 from edgar.xbrl import XBRL
@@ -24,20 +25,23 @@ class FilingTwentyF(BaseFiling):
 
         # Core filing sections & section chunks
         sections = await self._upsert_filing_section_pages(pages=pages, filing_id=filing['id'])
-        await self._upsert_filing_section_chunks(sections=sections, filing=filing)
+        section_chunks_task = self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
         # Financial statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
         # Filing notes and filing note chunks
         note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        filing_note_task = self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
         # TODO: Attachments / press release??
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        attachment_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+
+        _, _, attachment_data = await asyncio.gather(section_chunks_task, filing_note_task, attachment_task)
 
         # Update metadata + complete
-        await self._update_filing_counts(num_pages=len(pages), num_attachments=None, filing_id=filing['id'])
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
+                                         filing_id=filing['id'])
         await self._mark_synced(filing_id=filing['id'])
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:

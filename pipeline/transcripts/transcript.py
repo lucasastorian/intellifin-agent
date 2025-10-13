@@ -24,13 +24,13 @@ class Transcript:
         sections = self.parser.parse(content=self.content)
         transcript_id = await self._upsert_transcript(sections=sections)
 
-        await self._upsert_transcript(sections=sections)
+        await self._upsert_transcript_chunks(sections=sections, transcript_id=transcript_id)
 
     async def _upsert_transcript(self, sections: List[Dict[str, str]]) -> int:
         """Upserts the transcript and returns the transcript ID"""
         dt = datetime.datetime.strptime(self.date, "%Y-%m-%d %H:%M:%S")
 
-        response = await self.database.table("filings").upsert({
+        response = await self.database.table("earnings_transcripts").upsert({
             "sections": sections,
             "fiscal_year": self.fiscal_year,
             "fiscal_period": f"Q{self.fiscal_quarter}" if self.fiscal_quarter != 3 else "FY",
@@ -73,9 +73,12 @@ class Transcript:
         """Creates a header for embedding purposes"""
         dt = datetime.datetime.strptime(self.date, "%Y-%m-%d %H:%M:%S")
 
-        return f""" {self.company['name']} ({self.company['symbols'].join(', ')}) | |  {self.company['sector'] - self.company['industry']}
-        # Q{self.fiscal_quarter} FY {self.fiscal_year} Earnings Transcript Excerpt recorded on {dt.strftime('%B %-d, %Y')}
-            
-        ...
-        
-        """
+        symbols = ', '.join(self.company['symbols']) if self.company.get('symbols') else ''
+        sector = self.company.get('sector', '')
+        industry = self.company.get('industry', '')
+        sector_industry = f"{sector} | {industry}" if sector and industry else sector or industry or ""
+
+        return f"""# {self.company['name']} ({symbols}) | {sector_industry}
+## Q{self.fiscal_quarter} FY {self.fiscal_year} Earnings Transcript Excerpt recorded on {dt.strftime('%B %-d, %Y')}
+
+..."""

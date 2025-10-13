@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Dict
 from edgar.xbrl import XBRL
 
@@ -22,9 +23,11 @@ class FilingSixK(BaseFiling):
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
+        filing_chunks_task = self._upsert_filing_chunks(pages=pages, filing=filing)
 
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        attachments_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+
+        _, attachment_data = await asyncio.gather(filing_chunks_task, attachments_task)
 
         # Metadata update + complete
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

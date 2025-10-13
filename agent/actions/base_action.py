@@ -27,7 +27,8 @@ class BaseAction(ABC):
         raise NotImplementedError
 
     async def sync_symbols(self, symbols: List[str], forms: Optional[List[str]] = None,
-                           start_date: Optional[str] = None, end_date: Optional[str] = None):
+                           start_date: Optional[str] = None, end_date: Optional[str] = None,
+                           include_earnings_transcripts: bool = False):
         """Sync the filings for the symbols with optional filtering
 
         Args:
@@ -35,6 +36,7 @@ class BaseAction(ABC):
             forms: List of forms to sync (e.g., ['10-K', '10-Q']). Defaults to all forms.
             start_date: Filter filings by report_date >= this date (ISO format 'YYYY-MM-DD')
             end_date: Filter filings by report_date <= this date (ISO format 'YYYY-MM-DD')
+            include_earnings_transcripts: Whether to sync earnings transcripts
         """
         not_found = []
 
@@ -53,7 +55,8 @@ class BaseAction(ABC):
                     parts.append(f"({date_range})")
                 sync_desc += f" [{' '.join(parts)}]"
 
-            synced_count = await company.upsert(forms=forms, start_date=start_date, end_date=end_date)
+            synced_count = await company.upsert(forms=forms, start_date=start_date, end_date=end_date,
+                                                include_earnings_transcripts=include_earnings_transcripts)
 
             # Only show sync message if filings were actually synced
             if synced_count > 0:
