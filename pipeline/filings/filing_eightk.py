@@ -16,17 +16,18 @@ class FilingEightK(BaseFiling):
         self.filing_summarizer = FilingSummarizer(self.openai_client)
 
     async def upsert(self):
-        """Upserts the 8-K filing"""
+        """Upserts filing, filing pages, attachments/pages, press release chunks and filing chunks (abbrev)"""
         xbrl = await self._load_xbrl()
 
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
         attachment_data = await self._upsert_attachments(filing_id=filing['id'])
 
-        enriched_attachments = await self._enrich_attachments(attachment_data, filing)
-        await self._enrich_filing(filing, pages, enriched_attachments)
-        await self._update_filing_counts(filing_id=filing['id'])
-        await self._mark_synced()
+        # NOTE: chunking filing + press release missing here !
+
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
+                                         filing_id=filing['id'])
+        await self._mark_synced(filing_id=filing['id'])
 
         # TODO: Chunk the filing - excluding the first and last pages (cover + signature)
 

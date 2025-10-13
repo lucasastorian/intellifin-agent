@@ -24,10 +24,13 @@ class FilingTenQ(BaseFiling):
         await self._upsert_filing_notes(filing_id=filing['id'], filing=filing)
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
         attachment_data = await self._upsert_attachments(filing_id=filing['id'])
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
+        sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
+        await self._upsert_filing_section_chunks(filing=filing, sections=sections)
         await self._enrich_attachments(attachment_data, filing=filing)
-        await self._update_filing_counts(filing_id=filing['id'])
-        await self._mark_synced()
+
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
+                                         filing_id=filing['id'])
+        await self._mark_synced(filing_id=filing['id'])
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:
         """Creates a filing record"""
@@ -49,7 +52,6 @@ class FilingTenQ(BaseFiling):
 
     async def _upsert_attachments(self, filing_id: int) -> List[Dict]:
         """Upserts material attachments (exhibits) for 10-Q filings"""
-        # Only pull material exhibits: contracts, M&A, debt instruments, press releases
         material_exhibit_prefixes = ["2", "4", "10", "99"]
 
         def material_filter(exhibit_number: str) -> bool:
@@ -58,8 +60,11 @@ class FilingTenQ(BaseFiling):
 
         return await super()._upsert_attachments(filing_id, exhibit_filter=material_filter)
 
-    async def _upsert_filing_section_pages(self, sections: List[dict], filing_id: int):
-        """Upserts raw section pages before chunking"""
+    async def _upsert_filing_section_pages(self, pages: List[dict], filing: dict):
+        """Chunks the filing pages and upserts them"""
+        extractor = SectionExtractor(pages=pages, filing_type="10-Q")
+        sections = extractor.get_sections()
+
         all_pages = []
 
         for section in sections:
@@ -89,7 +94,7 @@ class FilingTenQ(BaseFiling):
                         "page": page['page'],
                         "content": page['content'],
                         "has_table": page.get('has_table', False),
-                        "filing_id": filing_id,
+                        "filing_id": filing['id'],
                         "company_id": self.company_id
                     })
 
@@ -99,18 +104,14 @@ class FilingTenQ(BaseFiling):
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    async def _upsert_filing_chunks(self, pages: List[dict], filing: dict):
-        """Chunks the filing pages and upserts them"""
+        return sections
+
+    async def _upsert_filing_section_chunks(self, filing: dict, sections: List[dict]):
+        """Upserts the filing section chunks"""
         fiscal_year = filing.get('fiscal_year')
         fiscal_period = fiscal_year.get('fiscal_period')
 
-        # Create embedding generator with company and filing context
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
-
-        extractor = SectionExtractor(pages=pages, filing_type="10-Q")
-        sections = extractor.get_sections()
-
-        await self._upsert_filing_section_pages(sections, filing_id=filing['id'])
 
         all_chunks = []
 

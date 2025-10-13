@@ -22,10 +22,13 @@ class FilingTwentyF(BaseFiling):
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
         await self._upsert_filing_notes(filing_id=filing['id'], filing=filing)
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
-        await self._update_filing_counts(filing_id=filing['id'])
+        sections = await self._upsert_filing_section_pages(pages=pages, filing_id=filing['id'])
+        await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
-        await self._mark_synced()
+        # TODO: Upsert attachments here?
+        await self._update_filing_counts(num_pages=len(pages), num_attachments=None, filing_id=filing['id'])
+
+        await self._mark_synced(filing_id=filing['id'])
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:
         """Creates a filing record"""
@@ -45,14 +48,17 @@ class FilingTwentyF(BaseFiling):
 
         return response.data[0]
 
-    async def _upsert_filing_section_pages(self, sections: List[dict], filing_id: int):
+    async def _upsert_filing_section_pages(self, pages: List[dict], filing_id: int) -> List[dict]:
         """Upserts raw section pages before chunking"""
+
+        extractor = SectionExtractor(pages=pages, filing_type="20-F")
+        sections = extractor.get_sections()
+
         all_pages = []
 
         for section in sections:
             section_item = section['item']
 
-            # Map 20-F items to section types
             if section_item == 'ITEM 3':
                 section_type = 'risk_factors'
             elif section_item == 'ITEM 4':
@@ -83,25 +89,20 @@ class FilingTwentyF(BaseFiling):
                 on_conflict="filing_id,section,page"
             ).execute()
 
-    async def _upsert_filing_chunks(self, pages: List[dict], filing: dict):
+        return sections
+
+    async def _upsert_filing_section_chunks(self, sections: List[dict], filing: dict):
         """Chunks the filing pages and upserts them"""
         fiscal_year = filing.get('fiscal_year')
         fiscal_period = filing.get('fiscal_period')
 
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
-        extractor = SectionExtractor(pages=pages, filing_type="20-F")
-        sections = extractor.get_sections()
-
-        # Upsert raw section pages
-        await self._upsert_filing_section_pages(sections, filing_id=filing['id'])
-
         all_chunks = []
 
         for section in sections:
             section_item = section['item']
 
-            # Map 20-F items to section types
             if section_item == 'ITEM 3':
                 section_type = 'risk_factors'
             elif section_item == 'ITEM 4':

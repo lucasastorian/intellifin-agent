@@ -53,7 +53,7 @@ FILING_STRUCTURES = {
 
 
 class SectionExtractor:
-    def __init__(self, pages: List[Dict], filing_type: Optional[Literal["10-K", "10-Q"]] = None, debug: bool = False):
+    def __init__(self, pages: List[Dict], filing_type: Optional[Literal["10-K", "10-Q", "20-F"]] = None, debug: bool = False):
         self.pages = pages
         self.filing_type = filing_type
         self.structure = FILING_STRUCTURES.get(filing_type) if filing_type else None

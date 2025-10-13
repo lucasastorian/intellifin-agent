@@ -40,6 +40,11 @@ class BaseFiling(ABC):
         """Upserts the filing and associated data to local DB"""
         raise NotImplementedError
 
+    @abstractmethod
+    def _upsert_filing(self, xbrl: XBRL):
+        """Upserts the filing to the local db"""
+        raise NotImplementedError
+
     async def _load_xbrl(self) -> XBRL:
         """Load XBRL using async SGML loading (caches result)"""
         await self.filing.sgml_async()  # Cache SGML
@@ -61,38 +66,29 @@ class BaseFiling(ABC):
             Type string: press_release, material_contract, corporate_governance, debt_securities,
                         merger_acquisition, subsidiaries, legal_compliance, or other
         """
-        # Extract prefix (e.g., "99" from "99.1", "10" from "10.2")
         prefix = exhibit_number.split(".")[0] if "." in exhibit_number else exhibit_number
 
-        # Press releases - EX-99, EX-99.1, EX-99.2, etc.
         if prefix == "99":
             return "press_release"
 
-        # Material contracts - EX-10, EX-10.1, etc.
         elif prefix == "10":
             return "material_contract"
 
-        # Corporate governance - EX-3.x (bylaws, charters)
         elif prefix == "3":
             return "corporate_governance"
 
-        # Debt/securities - EX-4.x (indentures, rights)
         elif prefix == "4":
             return "debt_securities"
 
-        # M&A - EX-2.x (merger/acquisition agreements)
         elif prefix == "2":
             return "merger_acquisition"
 
-        # Subsidiaries - EX-21
         elif prefix == "21":
             return "subsidiaries"
 
-        # Legal/compliance - EX-1 (underwriting), EX-5 (legal opinions), EX-23 (consents)
         elif prefix in ("1", "5", "23"):
             return "legal_compliance"
 
-        # Everything else
         else:
             return "other"
 
@@ -102,17 +98,12 @@ class BaseFiling(ABC):
                                                                      self.accession_number).execute()
         return len(result.data) > 0
 
-    async def _mark_synced(self):
+    async def _mark_synced(self, filing_id: int):
         """Mark this filing as synced in the database"""
-        await self.database.table("filings").update({"synced": True}).eq("accession_number", self.accession_number).execute()
-
-    @abstractmethod
-    def _upsert_filing(self, xbrl: XBRL):
-        """Upserts the filing to the local db"""
-        raise NotImplementedError
+        await self.database.table("filings").update({"synced": True}).eq("filing_id", filing_id).execute()
 
     async def _upsert_filing_pages(self, filing_id: int):
-        """Creates a record for the filing pages and returns the pages"""
+        """Creates a record for the filing pages and returns the raw pages"""
         html_content = await self._load_html()
 
         parser = Parser(content=html_content)
@@ -227,12 +218,8 @@ class BaseFiling(ABC):
 
         return ''.join([str(element) for element in elements])
 
-    async def _update_filing_counts(self, filing_id: int):
+    async def _update_filing_counts(self, num_pages: int, num_attachments: int, filing_id: int):
         """Updates the filing with page count and attachment count"""
-        num_pages = await self.database.table("filing_pages").select("*").eq("filing_id", filing_id).count()
-
-        num_attachments = await self.database.table("filing_attachments").select("*").eq("filing_id", filing_id).count()
-
         await self.database.table("filings").update({
             "num_pages": num_pages,
             "num_attachments": num_attachments
@@ -306,7 +293,7 @@ class BaseFiling(ABC):
             attachment_data.append({
                 "attachment_id": attachment_id,
                 "exhibit_number": exhibit_number,
-                "pages": pages[:5]
+                "pages": pages
             })
 
         return attachment_data
