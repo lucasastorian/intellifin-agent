@@ -9,22 +9,25 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.openai_client import OpenAIClient
 from agent.agent_config import AgentMode, get_agent_config
-from agent.actions import (ListCompaniesAction, ListFilingsAction, SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
-                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction, SemanticSearchAction, )
+from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, ReadFilingAction, ReadAttachmentAction,
+                           SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
+                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction,
+                           SemanticSearchAction, )
 
 
 class Agent:
+
     start_year: int = 2018
+    enable_web_search: bool = False
 
     def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20,
-                 reasoning_effort: str = "medium", mode: AgentMode = AgentMode.FULL):
+                 reasoning_effort: str = "medium"):
         self.edgar_user_agent = edgar_user_agent
         self.client = OpenAIClient(model=model, temperature=temperature, reasoning_effort=reasoning_effort)
         self.num_iter = 0
         self.max_iter = max_iter
         self.messages = []
         self._initialized = False
-        self.config = get_agent_config(mode)
 
         self.database = Database(schema=schema, base_path="./data/intellifin.db")
 
@@ -43,29 +46,28 @@ class Agent:
 
         self.messages.append(Message(role="user", status="completed", content=query))
 
-        all_actions = [
+        base_actions = [
+            # Create a plan
             PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            # ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            #
-            # SearchFilingSectionsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # SearchPressReleasesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # SearchCurrentReportsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            # SearchFilingNotesActionNew(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # Company search and filing listings
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # Read individual filings & their attachments
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+
+            # View the financial statements of a company - across filings (including Q3 inference for quarterly financials)
             ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent)
-        ]
+            # Execute Python code to calculate returns / CAGR / etc.
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
 
-        base_actions = all_actions
-        # base_actions = [
-        #     action for action in all_actions
-        #     if action.__class__.__name__ in self.config.enabled_actions
-        # ]
+            # Search across all filings / earnings transcripts for a company semantically.
+            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+        ]
 
         dynamic_actions = []
 

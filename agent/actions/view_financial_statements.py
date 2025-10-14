@@ -18,9 +18,6 @@ class ViewFinancialStatements(BaseModel):
 
     - Filters out segment/dimensional data (dimension=False only) unless include_segments=True
     """
-    thought: str = Field(
-        description="Explain what financial metrics or trends you're analyzing and why"
-    )
     symbol: str = Field(description="The ticker symbol of the company")
     statement_type: Literal['income_statement', 'balance_sheet', 'cash_flow'] = Field(
         description="Type of financial statement to view")
@@ -66,7 +63,7 @@ class ViewFinancialStatementsAction(BaseAction):
             )
 
         params = f"{args.symbol} {args.statement_type} ({args.report_type}), {args.start_date} → {args.end_date}"
-        self.log_start("ViewFinancialStatements", params, thought=args.thought)
+        self.log_start("ViewFinancialStatements", params)
 
         if args.report_type == 'quarterly':
             load_start_date = (date.fromisoformat(args.start_date) - timedelta(days=365)).isoformat()

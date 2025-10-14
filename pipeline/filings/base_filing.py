@@ -173,6 +173,11 @@ class BaseFiling(ABC):
         """Chunks filing notes and upserts them"""
         generator = NoteEmbeddingGenerator(company=self.company, filing=filing, chunk_size=2048, chunk_overlap=0)
 
+        # NOTE: voyage-context-3 compatibility issue
+        # Currently mixing chunks from MULTIPLE notes (separate documents) in one upsert batch.
+        # For contextualized embeddings, each note should be embedded separately to maintain
+        # context awareness within that specific note. Future optimization needed to group by
+        # note_id before embedding without excessive DB overhead.
         all_chunks = []
 
         for note_id, note_data in zip(note_ids, processed_notes):
@@ -357,6 +362,12 @@ class BaseFiling(ABC):
         }
 
         generator = AttachmentEmbeddingGenerator(self.company, filing_data, chunk_size=1024, chunk_overlap=0)
+
+        # NOTE: voyage-context-3 compatibility issue
+        # Currently mixing chunks from MULTIPLE attachments (separate documents like merger agreements,
+        # press releases, etc.) in one upsert batch. For contextualized embeddings, each attachment
+        # should be embedded separately to maintain context awareness within that specific exhibit.
+        # Future optimization needed to group by attachment_id before embedding without excessive DB overhead.
         all_chunks_data = []
 
         for attachment_data in chunkable_attachments:

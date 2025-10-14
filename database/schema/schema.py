@@ -16,6 +16,7 @@ class Schema:
         self.tables: Dict[str, Type[Table]] = {}
         self.views: Dict[str, Type[Table]] = {}
 
+        # SQLite keywords (case-insensitive)
         self._reserved_words = {
             'abort', 'action', 'add', 'after', 'all', 'alter', 'analyze', 'and', 'as', 'asc',
             'attach', 'autoincrement', 'before', 'begin', 'between', 'by', 'cascade', 'case',
@@ -34,6 +35,14 @@ class Schema:
             'where', 'with', 'without'
         }
 
+        # Engine-reserved names (case-insensitive): block user tables/views from colliding
+        # Note: _sys_* prefix is also reserved for future engine tables
+        self._reserved_names = {
+            'vector_outbox',  # async embedding retry outbox
+            # Add more engine tables here as needed, e.g.:
+            # '_sys_migrations', '_sys_vectors_meta'
+        }
+
     def add_table(self, table: Union[Type[Table], 'TableBuilder']) -> None:
         if hasattr(table, 'build'):
             from .builder import TableBuilder
@@ -44,26 +53,67 @@ class Schema:
         else:
             table_cls = table
 
-        if table_cls.__tablename__ in self.tables:
-            raise ValueError(f"Table '{table_cls.__tablename__}' already added.")
+        name = table_cls.__tablename__
+        lname = name.lower()
 
-        if self._is_reserved_word(table_cls.__tablename__):
-            raise ValueError(f"Table name '{table_cls.__tablename__}' is a SQLite reserved word. "
-                           f"Please choose a different name.")
+        if name in self.tables:
+            raise ValueError(f"Table '{name}' already added.")
 
-        self.tables[table_cls.__tablename__] = table_cls
+        if self._is_reserved_word(lname):
+            raise ValueError(
+                f"Table name '{name}' is a SQLite reserved word. "
+                f"Choose a different name."
+            )
+
+        if self._is_reserved_name(lname):
+            raise ValueError(
+                f"Table name '{name}' is reserved by the engine. "
+                f"Choose a different name (avoid 'vector_outbox' and '_sys_*' prefix)."
+            )
+
+        self.tables[name] = table_cls
 
     def add_view(self, view: Type[Table]) -> None:
-        view_name = view.__viewname__
-        if view_name in self.views:
-            raise ValueError(f"View '{view_name}' already added.")
-        if self._is_reserved_word(view_name):
-            raise ValueError(f"View name '{view_name}' is a SQLite reserved word.")
-        self.views[view_name] = view
+        name = view.__viewname__
+        lname = name.lower()
 
-    def _is_reserved_word(self, name: str) -> bool:
-        """Check if a name is a SQLite reserved word"""
-        return name.lower() in self._reserved_words
+        if name in self.views:
+            raise ValueError(f"View '{name}' already added.")
+
+        if self._is_reserved_word(lname):
+            raise ValueError(
+                f"View name '{name}' is a SQLite reserved word. "
+                f"Choose a different name."
+            )
+
+        if self._is_reserved_name(lname):
+            raise ValueError(
+                f"View name '{name}' is reserved by the engine. "
+                f"Choose a different name (avoid 'vector_outbox' and '_sys_*' prefix)."
+            )
+
+        self.views[name] = view
+
+    def _is_reserved_word(self, lname: str) -> bool:
+        """Check if a name is a SQLite reserved word (expects lowercased input)."""
+        return lname in self._reserved_words
+
+    def _is_reserved_name(self, lname: str) -> bool:
+        """Check if a name is reserved by the engine (expects lowercased input).
+
+        Reserved names include:
+        - Explicit names in _reserved_names set (e.g., 'vector_outbox')
+        - Any name starting with '_sys_' prefix (reserved for future engine tables)
+        """
+        return lname in self._reserved_names or lname.startswith('_sys_')
+
+    def reserve_names(self, names: set) -> None:
+        """Allow extensions to register additional reserved names.
+
+        Args:
+            names: Set of lowercase table/view names to reserve
+        """
+        self._reserved_names.update(names)
 
     def get_table(self, name: str) -> Type[Table]:
         if name not in self.tables:
@@ -75,7 +125,26 @@ class Schema:
         self.tables[table_cls.__tablename__] = table_cls
 
     def generate_all_sql(self) -> str:
-        """Generate SQL for all tables; validate FKs."""
+        """Generate SQL for all tables; validate FKs.
+
+        Also blocks engine-reserved names (helps catch legacy snapshots that
+        accidentally included system tables like 'vector_outbox').
+        """
+        # Sanity check: block engine-reserved names if present
+        for table_name in self.tables.keys():
+            if self._is_reserved_name(table_name.lower()):
+                raise ValueError(
+                    f"Schema includes reserved table '{table_name}'. "
+                    f"Remove or rename it (avoid 'vector_outbox' and '_sys_*' prefix)."
+                )
+
+        for view_name in self.views.keys():
+            if self._is_reserved_name(view_name.lower()):
+                raise ValueError(
+                    f"Schema includes reserved view '{view_name}'. "
+                    f"Remove or rename it (avoid 'vector_outbox' and '_sys_*' prefix)."
+                )
+
         all_sql = []
 
         for table_cls in self.tables.values():

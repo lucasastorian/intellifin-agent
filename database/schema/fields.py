@@ -357,7 +357,7 @@ class Enum(FieldDescriptor):
         sql = super().to_sql(name)
         # Add CHECK constraint for enum values
         choices_sql = ", ".join(f"'{c}'" for c in self.choices)
-        sql += f" CHECK({name} IN ({choices_sql}))"
+        sql += f" CHECK(`{name}` IN ({choices_sql}))"
         return sql
 
     def to_dict(self) -> Dict[str, Any]:
@@ -472,7 +472,7 @@ class Boolean(FieldDescriptor):
 
     def to_sql(self, name: str) -> str:
         """Generate SQL with proper default and CHECK constraint"""
-        sql = f"{name} INTEGER"
+        sql = f"`{name}` INTEGER"
 
         if not self.nullable:
             sql += " NOT NULL"
@@ -488,7 +488,7 @@ class Boolean(FieldDescriptor):
             sql += f" DEFAULT {dv}"
 
         # Enforce boolean domain (0 or 1 only)
-        sql += f" CHECK({name} IN (0, 1))"
+        sql += f" CHECK(`{name}` IN (0, 1))"
 
         if self.unique:
             sql += " UNIQUE"

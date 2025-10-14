@@ -1,11 +1,17 @@
 """Append-only vector store for brute-force similarity search."""
 import os
 import json
-import fcntl
 import threading
 import numpy as np
 from pathlib import Path
 from typing import Optional, List, Tuple, Iterable, Set
+
+# fcntl is Unix-only; on Windows, use only threading lock
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 
 class VectorStore:
@@ -157,10 +163,11 @@ class VectorStore:
             norms[norms == 0] = 1  # Avoid division by zero
             vecs_array = vecs_array / norms
 
-            # Append vectors and IDs with file locks
+            # Append vectors and IDs with file locks (Unix only)
             with open(self.vec_file, 'ab') as vf, open(self.id_file, 'ab') as idf:
-                fcntl.flock(vf.fileno(), fcntl.LOCK_EX)
-                fcntl.flock(idf.fileno(), fcntl.LOCK_EX)
+                if HAS_FCNTL:
+                    fcntl.flock(vf.fileno(), fcntl.LOCK_EX)
+                    fcntl.flock(idf.fileno(), fcntl.LOCK_EX)
 
                 try:
                     vecs_array.tofile(vf)
@@ -172,8 +179,9 @@ class VectorStore:
                     idf.flush()
                     os.fsync(idf.fileno())
                 finally:
-                    fcntl.flock(vf.fileno(), fcntl.LOCK_UN)
-                    fcntl.flock(idf.fileno(), fcntl.LOCK_UN)
+                    if HAS_FCNTL:
+                        fcntl.flock(vf.fileno(), fcntl.LOCK_UN)
+                        fcntl.flock(idf.fileno(), fcntl.LOCK_UN)
 
             # Invalidate cache after write
             self._invalidate_cache()
@@ -254,3 +262,4 @@ class VectorStore:
 
             # Copy results (don't return views into memmap)
             return ids[idx].copy(), scores[idx].copy()
+

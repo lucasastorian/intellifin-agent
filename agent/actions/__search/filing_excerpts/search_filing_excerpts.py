@@ -7,7 +7,7 @@ from datetime import date
 from agent.message import Action, Message
 from agent.action_response import ActionResponse, ActionFollowUp
 from agent.actions.base_action import BaseAction
-from agent.actions.search.filing_excerpts.curate_filing_excerpts import CurateFilingExcerptsAction
+from agent.actions.__search.filing_excerpts.curate_filing_excerpts import CurateFilingExcerptsAction
 
 
 class SearchFilingSections(BaseModel):

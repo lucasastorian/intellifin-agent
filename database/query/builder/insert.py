@@ -35,7 +35,21 @@ class InsertBuilder:
         max_vars = self.db._get_max_vars()
 
         total_params = num_cols * len(serialized_rows)
-        use_executemany = total_params > max_vars
+
+        # Check if table has vector fields (need RETURNING for embeddings)
+        table_cls = self.schema.get_table(self.table)
+        has_vector_fields = any(getattr(f, 'vector', False) for f in table_cls.get_fields().values())
+
+        # Fail fast if trying to insert into vector table without API key
+        if has_vector_fields and not self.db.embedder:
+            from ...errors import DatabaseError
+            raise DatabaseError(
+                f"Cannot INSERT into table '{self.table}' with vector fields without an embedder. "
+                f"Set VOYAGE_API_KEY environment variable."
+            )
+
+        # Disable executemany for vector-enabled tables to ensure RETURNING works
+        use_executemany = total_params > max_vars and not has_vector_fields
 
         all_results = []
         with self.db.transaction():

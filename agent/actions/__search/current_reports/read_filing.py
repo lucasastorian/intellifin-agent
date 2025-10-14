@@ -6,7 +6,7 @@ from database import Database
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.action_response import ActionResponse, ActionFollowUp
-from agent.actions.search.current_reports.curate_read_pages import CurateReadPagesAction
+from agent.actions.__search.current_reports.curate_read_pages import CurateReadPagesAction
 
 
 class ReadFilingAction(BaseAction):

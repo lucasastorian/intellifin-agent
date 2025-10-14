@@ -30,6 +30,24 @@ class UpdateBuilder(PredMixin):
         validated_data = self.db._validate_update_data(self.table, data_with_auto)
         serialized_data = self.db._serialize_json_fields(self.table, validated_data)
 
+        # Check if any updated fields are vector fields
+        table_cls = self.schema.get_table(self.table)
+        has_vector_fields = False
+        if table_cls:
+            for field_name in serialized_data.keys():
+                field = table_cls.get_fields().get(field_name)
+                if field and getattr(field, 'vector', False):
+                    has_vector_fields = True
+                    break
+
+        # Fail fast if trying to update vector fields without API key
+        if has_vector_fields and not self.db.embedder:
+            from ...errors import DatabaseError
+            raise DatabaseError(
+                f"Cannot UPDATE vector fields in table '{self.table}' without an embedder. "
+                f"Set VOYAGE_API_KEY environment variable."
+            )
+
         ir = UpdateIR(table=self.table, assign=serialized_data, where=self._pred)
         bound = bind_update(ir, self.schema)
         sql, params = generate_update(bound, self.dialect)

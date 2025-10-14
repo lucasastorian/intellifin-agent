@@ -7,7 +7,7 @@ from datetime import date
 from agent.message import Action, Message
 from agent.action_response import ActionResponse, ActionFollowUp
 from agent.actions.base_action import BaseAction
-from agent.actions.search.press_releases.curate_press_releases import CuratePressReleasesAction
+from agent.actions.__search.press_releases.curate_press_releases import CuratePressReleasesAction
 
 
 class SearchPressReleases(BaseModel):

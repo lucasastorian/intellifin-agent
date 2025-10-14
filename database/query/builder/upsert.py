@@ -153,12 +153,35 @@ class UpsertBuilder:
                     has_vector_fields = True
                     break
 
+        # Fail fast if trying to upsert into vector table without API key
+        if has_vector_fields and not self.db.embedder:
+            from ...errors import DatabaseError
+            raise DatabaseError(
+                f"Cannot UPSERT into table '{self.table}' with vector fields without an embedder. "
+                f"Set VOYAGE_API_KEY environment variable."
+            )
+
         total_params = num_cols * len(serialized_rows)
         use_executemany = total_params > max_vars and not has_vector_fields and not use_select_insert
 
         async def _exec_upsert():
             all_results = []
-            with self.db.transaction():
+
+            # Only wrap in transaction if not already inside one
+            # This prevents nested transaction issues and allows batching
+            ctx_owns_txn = not self.db.in_transaction()
+
+            if ctx_owns_txn:
+                cm = self.db.transaction()
+            else:
+                # No-op async context manager - already in transaction
+                from contextlib import asynccontextmanager
+                @asynccontextmanager
+                async def noop():
+                    yield
+                cm = noop()
+
+            async with cm:
                 if use_select_insert:
                     # Generate SELECT-based INSERT to pull missing NOT NULL fields from existing row
                     # This avoids validation errors when doing PK-based partial updates
@@ -222,7 +245,8 @@ class UpsertBuilder:
                         f"ON CONFLICT ({conflict_cols}) {action}"
                     )
                     param_rows = [[row[c] for c in cols] for row in serialized_rows]
-                    self.db.conn.executemany(sql, param_rows)
+                    with self.db._lock:
+                        self.db.conn.executemany(sql, param_rows)
                     return None  # Signal executemany was used
                 else:
                     batch_size = max(1, max_vars // num_cols)
@@ -255,7 +279,11 @@ class UpsertBuilder:
         return Result(all_results)
 
     async def _embed_vectors(self, rows: List[Dict[str, Any]]):
-        """Embed and store vectors for vector-enabled fields"""
+        """Embed and store vectors - queue if in transaction, immediate otherwise.
+
+        If inside a transaction context, embeddings are queued and batched on commit.
+        Otherwise, embeddings are generated immediately (backwards compatible behavior).
+        """
         if not rows or not self.db.embedder:
             return
 
@@ -277,7 +305,9 @@ class UpsertBuilder:
         if not vector_fields:
             return
 
-        # Embed each vector field
+        in_txn = self.db.in_transaction()
+
+        # Process each vector field
         for field_name in vector_fields:
             # Collect texts and IDs
             texts = []
@@ -290,10 +320,13 @@ class UpsertBuilder:
             if not texts:
                 continue
 
-            # Batch embed (async)
-            embeddings = await self.db.embedder.embed(texts)
-            vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
+            if in_txn:
+                # Queue for batch embedding on transaction commit
+                self.db._enqueue_embedding(self.table, field_name, ids, texts)
+            else:
+                # Backwards compatible: embed immediately
+                embeddings = await self.db.embedder.embed(texts)
+                vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
-            # Store in vector store
-            vector_store = self.db.get_or_create_vector_store(self.table, field_name)
-            vector_store.add_batch(ids, vectors)
+                vector_store = self.db.get_or_create_vector_store(self.table, field_name)
+                vector_store.add_batch(ids, vectors)

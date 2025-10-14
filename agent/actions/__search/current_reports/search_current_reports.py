@@ -6,9 +6,9 @@ from datetime import date, datetime
 from agent.message import Action, Message
 from agent.action_response import ActionResponse, ActionFollowUp
 from agent.actions.base_action import BaseAction
-from agent.actions.search.current_reports.read_filing import ReadFilingAction
-from agent.actions.search.current_reports.read_attachment import ReadAttachmentAction
-from agent.actions.search.current_reports.exit_reading import ExitReadingAction
+from agent.actions.__search.current_reports.read_filing import ReadFilingAction
+from agent.actions.__search.current_reports.read_attachment import ReadAttachmentAction
+from agent.actions.__search.current_reports.exit_reading import ExitReadingAction
 
 
 class SearchCurrentReports(BaseModel):

@@ -11,33 +11,21 @@ AllowedForm = Literal["10-K", "10-Q", "8-K", "DEF 14A", "6-K", "20-F"]
 
 
 class ListFilings(BaseModel):
-    """List available SEC filings based on the ticker symbol, forms, and date range (limited to 50 filings)
+    """List available SEC filings based on ticker symbol, forms, and date range (limited to 50 filings)
 
-    IMPORTANT: Date filtering is by REPORT_DATE (fiscal period end date), NOT filing_date (SEC submission date).
-    Example: A 2019 10-K filed in January 2020 has report_date in 2019, so it will NOT appear if start_date is 2020-01-01.
-    To find filings for fiscal year 2019, use start_date in 2019 (e.g., 2019-01-01).
-
-    - Use this first to identify filings before reading content via ReadFiling or searching via Search actions
-    - Returns a Markdown table with: id, form, title (for 8-K/6-K), items (for 8-K), pages, attachments count,
-        report_date, filing_date, fiscal_period, fiscal_year
+    - Filters by filing_date (SEC submission date), not report_date (fiscal period end)
+    - Returns a Markdown table with: id, company, symbols, exchanges, form, title (for 8-K/6-K), items (for 8-K),
+      press_release indicator, pages, attachments count, report_date, filing_date, fiscal_period, fiscal_year
     - Results sorted by filing_date in descending order
-    - For each form - will return both original submissions and amendments where applicable
-    - The fiscal period (Q1/Q2/Q3/FY) and fiscal year returned in the table are from the companies' own fiscal calendar
-    - Use ReadFiling action with the filing ID to explore attachments, notes, and content
+    - Returns both original submissions and amendments where applicable
+    - Use ReadFiling action with the filing ID to explore attachments, notes, and detailed content
     """
-    thought: str = Field(
-        description="Describe what you're searching for and how it will help you achieve your objective"
-    )
     symbols: List[str] = Field(..., description="Ticker symbols to include (e.g., ['AAPL','MSFT']).", min_length=1)
     forms: List[AllowedForm] = Field(..., description="Forms to include in the search results. ", min_length=1)
-    start_date: str = Field(..., description="Filter by report_date (fiscal period end) >= this ISO date 'YYYY-MM-DD'. "
-                                            "NOT filing_date. For fiscal year 2019 filings, use a 2019 start date.")
-    end_date: Optional[str] = Field(..., description="Filter by report_date (fiscal period end) <= this ISO date 'YYYY-MM-DD'. "
-                                                     "NOT filing_date. Defaults to today.")
-    # include_attachments: Optional[bool] = Field(description="Whether to list the attachments for each filing",
-    #                                             default=False)
-    # include_notes: Optional[bool] = Field(description="Whether to list the notes available for each filing",
-    #                                       default=False)
+    start_date: str = Field(..., description="Filter by filing_date (SEC submission date) >= this ISO date 'YYYY-MM-DD'.")
+    end_date: Optional[str] = Field(...,
+                                    description="Filter by filing_date (SEC submission date) <= this ISO date 'YYYY-MM-DD'. "
+                                                "Defaults to today.")
 
     @classmethod
     @field_validator("symbols")
@@ -83,7 +71,7 @@ class ListFilingsAction(BaseAction):
 
         params = f"{', '.join(args.symbols)} ({', '.join(args.forms)}), {args.start_date} → {args.end_date or ''}"
 
-        self.log_start("ListFilings", params=params, thought=args.thought)
+        self.log_start("ListFilings", params=params)
 
         not_found = await self.sync_symbols(symbols=args.symbols, forms=args.forms,
                                             start_date=args.start_date, end_date=args.end_date)
@@ -101,7 +89,6 @@ class ListFilingsAction(BaseAction):
 
         forms = self._expand_forms_with_amendments(args.forms)
 
-        # Query the company_filings view directly
         qb = (
             self.database
             .table("company_filings")
@@ -110,11 +97,11 @@ class ListFilingsAction(BaseAction):
                 "fiscal_year,fiscal_period,filing_date,report_date,accession_number,num_pages,num_attachments")
             .contains("company_symbols", args.symbols)
             .in_("form", forms)
-            .gte("report_date", args.start_date)
-            .lte("report_date", args.end_date or date.today().isoformat())
+            .gte("filing_date", args.start_date)
+            .lte("filing_date", args.end_date or date.today().isoformat())
         )
 
-        filings_result = await qb.order("report_date", desc=True).limit(50).execute()
+        filings_result = await qb.order("filing_date", desc=True).limit(50).execute()
 
         if not filings_result.data:
             self.log_done("No filings found")
@@ -127,7 +114,6 @@ class ListFilingsAction(BaseAction):
                 )
             )
 
-        # Get company information for the header
         company_ids = {f['company_id'] for f in filings_result.data if f.get('company_id')}
         company_info = {}
         if company_ids:
@@ -140,15 +126,11 @@ class ListFilingsAction(BaseAction):
             )
             company_info = {c['id']: c for c in companies_result.data}
 
-        # Attachments and notes disabled - use ReadFiling action instead
         content = self._format_filings_to_md(
             filings=filings_result.data,
-            company_info=company_info,
-            attachments_by_filing=None,
-            notes_by_filing=None
+            company_info=company_info
         )
 
-        # Build result summary
         companies = {f['company_name'] for f in filings_result.data if f.get('company_name')}
         forms = {f['form'] for f in filings_result.data}
         summary = f"Found {len(filings_result.data)} filings: {', '.join(sorted(forms))}"
@@ -166,57 +148,8 @@ class ListFilingsAction(BaseAction):
             )
         )
 
-    async def _load_attachments(self, filing_ids: List[int]) -> dict:
-        """Load all attachments for the given filing IDs, returns dict mapping filing_id -> list of attachments"""
-        if not filing_ids:
-            return {}
-
-        result = await (
-            self.database
-            .table("filing_attachments")
-            .select("id,filing_id,exhibit_number,title,type,num_pages")
-            .in_("filing_id", filing_ids)
-            .order("exhibit_number")
-            .execute()
-        )
-
-        # Group by filing_id
-        attachments_by_filing = {}
-        for att in result.data:
-            filing_id = att['filing_id']
-            if filing_id not in attachments_by_filing:
-                attachments_by_filing[filing_id] = []
-            attachments_by_filing[filing_id].append(att)
-
-        return attachments_by_filing
-
-    async def _load_notes(self, filing_ids: List[int]) -> dict:
-        """Load all notes for the given filing IDs, returns dict mapping filing_id -> list of notes"""
-        if not filing_ids:
-            return {}
-
-        result = await (
-            self.database
-            .table("filing_notes")
-            .select("id,filing_id,title,preview,filename")
-            .in_("filing_id", filing_ids)
-            .order("filename")
-            .execute()
-        )
-
-        # Group by filing_id
-        notes_by_filing = {}
-        for note in result.data:
-            filing_id = note['filing_id']
-            if filing_id not in notes_by_filing:
-                notes_by_filing[filing_id] = []
-            notes_by_filing[filing_id].append(note)
-
-        return notes_by_filing
-
     @staticmethod
-    def _format_filings_to_md(filings: List[dict], company_info: dict = None,
-                              attachments_by_filing: dict = None, notes_by_filing: dict = None) -> str:
+    def _format_filings_to_md(filings: List[dict], company_info: dict = None) -> str:
         """Formats the filings as a Markdown table with optional company header"""
 
         def fmt_items(v):
@@ -253,14 +186,7 @@ class ListFilingsAction(BaseAction):
                 header += f"**{name}** ({symbols}){delisted_tag}\n"
                 header += f"Sector: {sector} | Industry: {industry} | Fiscal Year End: {fiscal_year_end}\n\n"
 
-        # Build rows - if we have attachments or notes, we'll manually format markdown
-        # Otherwise use pandas for simple table
-        if attachments_by_filing or notes_by_filing:
-            return header + ListFilingsAction._format_with_nested_rows(
-                filings, attachments_by_filing, notes_by_filing, fmt_items
-            )
-
-        # Simple case: no nested rows, use pandas
+        # Build table rows
         rows = []
         for f in filings:
             filing_title = f.get('title') if f['form'] in ['8-K', '8-K/A', '6-K', '6-K/A'] else '-'
@@ -294,63 +220,3 @@ class ListFilingsAction(BaseAction):
         df = df.sort_values(by="filing_date", ascending=False, kind="stable")
 
         return header + df.to_markdown(index=False)
-
-    @staticmethod
-    def _format_with_nested_rows(filings: List[dict], attachments_by_filing: dict = None,
-                                 notes_by_filing: dict = None, fmt_items=None) -> str:
-        """Formats filings with nested attachments and notes as a markdown table"""
-
-        # Build header
-        lines = []
-        lines.append("| id | form | title | items | pages | attachments | notes | report_date | filing_date | fiscal_period | fiscal_year |")
-        lines.append("|----|----|----|----|----|----|----|----|----|----|---|")
-
-        # Sort filings by filing_date descending
-        sorted_filings = sorted(filings, key=lambda f: f.get('filing_date', ''), reverse=True)
-
-        for f in sorted_filings:
-            filing_id = f['id']
-            filing_title = f.get('title') if f['form'] in ['8-K', '8-K/A', '6-K', '6-K/A'] else '-'
-            items_str = fmt_items(f.get('items', [])) if fmt_items else ''
-
-            # Main filing row
-            lines.append(
-                f"| {filing_id} "
-                f"| {f['form']} "
-                f"| {filing_title or '-'} "
-                f"| {items_str} "
-                f"| {f.get('num_pages') or ''} "
-                f"| {f.get('num_attachments') or ''} "
-                f"| {len(notes_by_filing.get(filing_id, [])) if notes_by_filing else ''} "
-                f"| {f['report_date']} "
-                f"| {f['filing_date']} "
-                f"| {f.get('fiscal_period') or '-'} "
-                f"| {f.get('fiscal_year') or '-'} |"
-            )
-
-            # Attachment rows (nested)
-            if attachments_by_filing and filing_id in attachments_by_filing:
-                for att in attachments_by_filing[filing_id]:
-                    att_title = att.get('title') or '-'
-                    lines.append(
-                        f"| ↳ {att['id']} "
-                        f"| EX-{att['exhibit_number']} "
-                        f"| {att_title} "
-                        f"| {att.get('type', '-')} "
-                        f"| {att.get('num_pages') or ''} "
-                        f"| - | - | - | - | - | - |"
-                    )
-
-            # Note rows (nested)
-            if notes_by_filing and filing_id in notes_by_filing:
-                for note in notes_by_filing[filing_id]:
-                    note_preview = note.get('preview') or '-'
-                    lines.append(
-                        f"| ↳ {note['id']} "
-                        f"| Note "
-                        f"| {note['title']} "
-                        f"| {note_preview} "
-                        f"| - | - | - | - | - | - | - |"
-                    )
-
-        return "\n".join(lines)

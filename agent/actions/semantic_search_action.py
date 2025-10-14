@@ -75,7 +75,7 @@ class SemanticSearch(BaseModel):
         "financing_terms",  # EX-1.1, EX-3.1
         "debt_terms",  # EX-4.1/4.2
         "merger_terms",  # EX-2.1
-        "press_investor"  # EX-99 / 99.1 / 99.2
+        "press_releases_and_investor_presentations"  # EX-99 / 99.1 / 99.2
     ]]] = Field(
         description="The types of documents to focus on for current reports in particular"
     )
@@ -90,29 +90,46 @@ class SemanticSearch(BaseModel):
             "examples": [
                 {
                     "symbol": "MSFT",
-                    "query": "forward capital expenditure guidance AI infrastructure spending 2025",
+                    "query": "Microsoft's forward-looking capital expenditure plans and guidance for building out AI datacenter infrastructure and purchasing GPUs in fiscal years 2025 and 2026. Looking for any specific dollar amounts they've disclosed, whether they've broken this down by geographic region or business segment, and any commentary from management about the scale of these investments relative to prior years.",
                     "document_types": ["earnings_transcript"],
                     "start_date": "2024-01-01",
                     "limit": 5
                 },
                 {
                     "symbol": "NVDA",
-                    "query": "risk factors related to export controls China revenue restrictions",
+                    "query": "NVIDIA's risk factor disclosures and commentary about US export control regulations that restrict their ability to sell chips to Chinese customers. Looking for any quantitative estimates of revenue impact, what workarounds or alternative product designs they're pursuing to stay compliant, and management's assessment of how burdensome these regulations are for their business operations.",
                     "document_types": ["annual_report", "quarterly_report"],
                     "start_date": "2024-01-01",
                     "limit": 10
                 },
                 {
+                    "symbol": "TSLA",
+                    "query": "Tesla's quarterly vehicle delivery and production results broken down by individual vehicle model - specifically Model 3, Model Y, Model S, Model X, and Cybertruck. Looking for both the raw unit numbers and growth rates calculated on a sequential quarter-over-quarter basis and year-over-year basis.",
+                    "document_types": ["current_report"],
+                    "current_report_focus": ["press_releases_and_investor_presentations"],
+                    "start_date": "2024-01-01",
+                    "limit": 10
+                },
+                {
+                    "symbol": "T",
+                    "query": "The definitive terms of AT&T's senior unsecured notes offering, including the total principal amount they raised, the annual interest rate or coupon rate they're paying to bondholders, when the notes mature, what they plan to use the proceeds for, and any redemption provisions or financial covenants disclosed in the indenture or pricing supplement documents.",
+                    "document_types": ["current_report"],
+                    "current_report_focus": ["financing_terms", "debt_terms"],
+                    "start_date": "2024-01-01",
+                    "limit": 5
+                },
+                {
                     "symbol": "META",
-                    "query": "accounting policy for capitalizing internal-use software development costs",
+                    "query": "Meta's accounting policies describing how they decide whether to capitalize or expense their internal-use software development costs. Looking for the specific criteria they use to make this decision, how many years they amortize capitalized amounts over, what categories of costs qualify for capitalization (like employee salaries, external consultant fees, allocated overhead), and whether they've changed this policy recently.",
                     "document_types": ["annual_report"],
                     "start_date": "2023-01-01",
                     "limit": 5
                 },
                 {
-                    "symbol": "BA",
-                    "query": "material production halt announcement or delivery delays",
+                    "symbol": "DIS",
+                    "query": "The definitive merger or acquisition agreement where Disney acquired another company, including the total purchase price Disney paid, whether the deal was structured as a cash transaction or stock transaction, any earnout provisions or contingent payments based on future performance, key representations and warranties from both parties, material adverse change clauses that could allow termination, any breakup or termination fees, and the expected timeline for closing the transaction.",
                     "document_types": ["current_report"],
+                    "current_report_focus": ["merger_terms"],
                     "start_date": "2024-01-01",
                     "limit": 5
                 }
@@ -367,7 +384,7 @@ class SemanticSearchAction(BaseAction):
             'financing_terms': ['underwriting_agreement', 'certificate_of_designations'],
             'debt_terms': ['indenture', 'supplemental_indenture', 'debt_instrument'],
             'merger_terms': ['merger_agreement'],
-            'press_investor': ['press_or_investor']
+            'press_releases_and_investor_presentations': ['press_or_investor']
         }
 
         attachment_types = []

@@ -14,9 +14,6 @@ class ListCompanies(BaseModel):
     - Searches by both company name (partial, case-insensitive) and ticker symbol (exact match)
     - Returns up to 10 results with ticker symbols, industry, sector, and exchanges
     """
-    thought: str = Field(
-        description="Explain why you're searching for this company and what you plan to do with the results"
-    )
     query: str = Field(description="Company name, partial name, or ticker symbol to search for (e.g., 'Apple', 'AAPL', 'Microsoft')")
 
 
@@ -43,9 +40,8 @@ class ListCompaniesAction(BaseAction):
             )
 
         params = f"'{args.query}'"
-        self.log_start("ListCompanies", params, thought=args.thought)
+        self.log_start("ListCompanies", params)
 
-        # Search by name (case-insensitive partial match)
         name_results = await (
             self.database
             .table("companies")
@@ -55,7 +51,6 @@ class ListCompaniesAction(BaseAction):
             .execute()
         )
 
-        # Search by symbol (exact match in JSON array)
         symbol_results = await (
             self.database
             .table("companies")
@@ -65,7 +60,6 @@ class ListCompaniesAction(BaseAction):
             .execute()
         )
 
-        # Merge and dedupe by ID
         seen_ids = set()
         matches = []
         for result_set in [name_results.data, symbol_results.data]:

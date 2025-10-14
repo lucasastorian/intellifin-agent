@@ -181,10 +181,6 @@ class PythonExec(BaseModel):
     Set reset=True to clear all variables and start fresh.
     """
 
-    thought: str = Field(
-        description="Brief explanation of what this calculation does and what you're computing"
-    )
-
     code: str = Field(
         description="Python code to execute. Variables persist across calls. "
                     "MUST end with an expression OR define result/out/data/summary to return a value."
@@ -266,7 +262,7 @@ class PythonExecAction(BaseAction):
 
         # Show code in logs (truncate if very long)
         code_preview = args.code if len(args.code) <= 100 else args.code[:97] + "..."
-        self.log_start("PythonExec", f"Code: {code_preview} | Vars: {var_count}", thought=args.thought)
+        self.log_start("PythonExec", f"Code: {code_preview} | Vars: {var_count}")
 
         # Acquire lock to prevent concurrent execution
         async with self._lock:

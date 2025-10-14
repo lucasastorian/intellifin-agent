@@ -4,18 +4,18 @@ from pydantic import BaseModel, Field, create_model
 from database import Database
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
-from agent.action_response import ActionResponse, ContextRefinement, ActionFollowUp
-from agent.actions.search.filing_notes.read_full_filing_note import ReadFullFilingNoteAction
+from agent.action_response import ActionResponse, ContextRefinement
 
 
-class CurateFilingNoteExcerptsAction(BaseAction):
+class CuratePressReleasesAction(BaseAction):
+    MAX_SELECTED_EXCERPTS = 15  # Hard limit on curation
 
     def __init__(self, excerpts: List[dict], original_search_message_id: str, database: Database,
                  edgar_user_agent: str, start_year: int = 2017):
         super().__init__(database=database, edgar_user_agent=edgar_user_agent, start_year=start_year)
         self.excerpts = excerpts
         self.original_search_message_id = original_search_message_id
-        self.name = 'CurateFilingNoteExcerpts'
+        self.name = 'CuratePressReleases'
 
     @property
     def schema(self) -> BaseModel:
@@ -32,7 +32,7 @@ class CurateFilingNoteExcerptsAction(BaseAction):
             'search_results_relevant': (
                 Literal['relevant', 'not_relevant'],
                 Field(
-                    description="Decide whether any of the filing note excerpts are relevant to your query. "
+                    description="Decide whether any of the press release excerpts are relevant to your query. "
                                 "If 'relevant', the context will be updated to show only selected excerpts. "
                                 "If 'not_relevant', the entire search output will be replaced with your summary."
                 )
@@ -55,25 +55,23 @@ class CurateFilingNoteExcerptsAction(BaseAction):
         }
 
         return create_model(
-            'CurateFilingNoteExcerpts',
+            'CuratePressReleases',
             **fields,
-            __doc__=f"""Curate the {len(self.excerpts)} filing note search results by selecting relevant excerpts or summarizing findings.
+            __doc__=f"""Curate the {len(self.excerpts)} press release search results by selecting relevant excerpts or summarizing findings.
 
 This action allows you to refine your context window by:
 1. Selecting only the relevant excerpts (if any are useful)
 2. Replacing the entire search output with a concise summary (if results are not useful)
 
-Your selection will modify the previous search message to reduce token usage and improve focus.
-
-After curation, you can optionally read full notes if any excerpts were truncated or need more context."""
+Your selection will modify the previous search message to reduce token usage and improve focus."""
         )
 
     async def call(self, action: Action) -> ActionResponse:
-        """Curate filing note search results by selecting relevant excerpts"""
+        """Curate press release search results by selecting relevant excerpts"""
         try:
             args = self.schema(**action.body)
         except Exception as e:
-            self.log_start("CurateFilingNoteExcerpts")
+            self.log_start("CuratePressReleases")
             self.log_error(f"Validation failed: {e}")
             return ActionResponse(
                 message=Message(
@@ -85,7 +83,7 @@ After curation, you can optionally read full notes if any excerpts were truncate
                 )
             )
 
-        self.log_start("CurateFilingNoteExcerpts", params=f"relevance={args.search_results_relevant}")
+        self.log_start("CuratePressReleases", params=f"relevance={args.search_results_relevant}")
 
         selected_ids = getattr(args, 'selected_excerpt_ids', [])
         summary = args.summary
@@ -95,33 +93,17 @@ After curation, you can optionally read full notes if any excerpts were truncate
             id_to_excerpt = {excerpt['id']: excerpt for excerpt in self.excerpts}
             selected_excerpts = [id_to_excerpt[excerpt_id] for excerpt_id in selected_ids if excerpt_id in id_to_excerpt]
 
-            from agent.actions.search.filing_notes.search_filing_notes import SearchFilingNotesAction
+            from agent.actions.__search.press_releases.search_press_releases import SearchPressReleasesAction
 
-            replacement_content = SearchFilingNotesAction.curate(
+            replacement_content = SearchPressReleasesAction.curate(
                 excerpts=selected_excerpts,
                 summary=summary
             )
 
-            # Extract unique note IDs for optional follow-up
-            unique_note_ids = list(set(exc['filing_note_id'] for exc in selected_excerpts))
-
-            # Create optional ReadFullFilingNote action
-            read_full_note_action = ReadFullFilingNoteAction(
-                valid_note_ids=unique_note_ids,
-                database=self.database,
-                edgar_user_agent=self.edgar_user_agent,
-                start_year=self.start_year
-            )
-
-            confirmation = f"Context refined to {len(selected_excerpts)} relevant note excerpt(s)."
-            follow_up = ActionFollowUp(
-                actions=[read_full_note_action],
-                force=False  # Optional - LLM can choose to read full notes or not
-            )
+            confirmation = f"Context refined to {len(selected_excerpts)} relevant press release excerpt(s)."
         else:
-            replacement_content = "Filing note search results not relevant (see curation summary)."
-            confirmation = "Context refined (filing note results not relevant)."
-            follow_up = None
+            replacement_content = "Press release search results not relevant (see curation summary)."
+            confirmation = "Context refined (press release results not relevant)."
 
         self.log_done(f"Curated to {len(selected_ids) if selected_ids else 0} excerpts")
 
@@ -135,6 +117,5 @@ After curation, you can optionally read full notes if any excerpts were truncate
             context_refinement=ContextRefinement(
                 message_id=self.original_search_message_id,
                 refined_content=replacement_content
-            ),
-            follow_up=follow_up
+            )
         )

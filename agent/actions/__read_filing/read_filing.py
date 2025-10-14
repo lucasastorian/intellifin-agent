@@ -97,8 +97,8 @@ class ReadFilingAction(BaseAction):
         note_ids = [note['id'] for note in notes]
 
         # Import here to avoid circular dependency
-        from agent.actions.read_filing.read_filing_content import ReadFilingContentAction
-        from agent.actions.read_filing.exit_filing_reading import ExitFilingReadingAction
+        from agent.actions.__read_filing.read_filing_content import ReadFilingContentAction
+        from agent.actions.__read_filing.exit_filing_reading import ExitFilingReadingAction
 
         read_content = ReadFilingContentAction(
             filing_id=args.filing_id,

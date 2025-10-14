@@ -138,7 +138,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
             action_id=action.id
         )
 
-        from agent.actions.read_filing.curate_filing_content import CurateFilingContentAction
+        from agent.actions.__read_filing.curate_filing_content import CurateFilingContentAction
 
         curate_action = CurateFilingContentAction(
             document_type=args.document,
