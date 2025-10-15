@@ -178,7 +178,7 @@ class Agent:
     @property
     def usage(self) -> Usage:
         """Calculate total token usage from all messages."""
-        usage = Usage(cached_input_tokens=0, uncached_input_tokens=0, thinking_tokens=0, completion_tokens=0)
+        usage = Usage(cached_prompt_tokens=0, uncached_prompt_tokens=0, thinking_tokens=0, completion_tokens=0)
 
         for message in self.messages:
             if message.uncached_prompt_tokens:

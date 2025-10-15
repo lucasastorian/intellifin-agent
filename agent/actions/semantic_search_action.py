@@ -160,7 +160,15 @@ class SemanticSearchAction(BaseAction):
         self.log_start("SemanticSearch", params=params)
 
         forms = self._get_forms_for_document_types(args.document_types)
-        include_transcripts = "earnings_transcript" in args.document_types
+        include_transcripts = (
+            "earnings_transcript" in args.document_types or
+            "earnings_transcripts" in args.document_types
+        )
+
+        # Debug: isolate potential hang during sync
+        if self.verbose:
+            print("  → Syncing symbols before search...", flush=True)
+
         not_found = await self.sync_symbols(
             symbols=[args.symbol],
             forms=forms,
@@ -168,6 +176,9 @@ class SemanticSearchAction(BaseAction):
             end_date=args.end_date,
             include_earnings_transcripts=include_transcripts
         )
+
+        if self.verbose:
+            print("  → Sync complete.", flush=True)
 
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
@@ -190,7 +201,7 @@ class SemanticSearchAction(BaseAction):
                 self._search_attachment_chunks(args, forms)
             ])
 
-        if "earnings_transcript" in args.document_types:
+        if "earnings_transcript" in args.document_types or "earnings_transcripts" in args.document_types:
             tasks.append(self._search_transcript_chunks(args))
 
         results_list = await asyncio.gather(*tasks)

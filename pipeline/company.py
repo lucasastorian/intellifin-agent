@@ -71,7 +71,7 @@ class Company:
 
     async def _upsert_filings(self, company: dict, forms: Optional[List[str]] = None,
                               start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
-        filings = self._load_filings(forms=forms)
+        filings = await self._load_filings(forms=forms, start_date=start_date, end_date=end_date)
 
         if start_date or end_date:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
@@ -103,10 +103,28 @@ class Company:
 
         return response.data[0]
 
-    def _load_filings(self, forms: Optional[List[str]] = None) -> EntityFilings:
-        """Load filings from EDGAR"""
+    async def _load_filings(self, forms: Optional[List[str]] = None,
+                            start_date: Optional[str] = None,
+                            end_date: Optional[str] = None) -> EntityFilings:
+        """Load filings from EDGAR without blocking the event loop.
+
+        - Narrows the year range based on optional start/end dates to reduce network calls.
+        - Offloads the synchronous EDGAR call to a thread using asyncio.to_thread.
+        """
         forms_to_load = forms if forms else self.forms
-        return self.company.get_filings(form=forms_to_load, year=list(range(self.start_year, self.end_year)))
+
+        # Compute minimal year list if date filters provided
+        if start_date or end_date:
+            start_year = date.fromisoformat(start_date).year if start_date else self.start_year
+            end_year = date.fromisoformat(end_date).year if end_date else (self.end_year - 1)
+            start_year = max(start_year, self.start_year)
+            end_year = min(end_year, self.end_year - 1)
+            years = list(range(start_year, end_year + 1)) if start_year <= end_year else []
+        else:
+            years = list(range(self.start_year, self.end_year))
+
+        # Offload blocking EDGAR call
+        return await asyncio.to_thread(self.company.get_filings, form=forms_to_load, year=years)
 
     def _filter_filings_by_date(self, filings: EntityFilings, start_date: Optional[str] = None,
                                 end_date: Optional[str] = None) -> List[EntityFiling]:
@@ -165,8 +183,15 @@ class Company:
 
     async def _sync_transcripts(self, company: dict, start_date: Optional[str] = None,
                                 end_date: Optional[str] = None):
-        """Syncs earnings transcripts for the given date range (uses batch endpoint per fiscal year)"""
-        async with aiohttp.ClientSession() as session:
+        """Syncs earnings transcripts for the given date range (uses batch endpoint per fiscal year)
+
+        Adds client timeouts to avoid indefinite hangs and skips if FMP_API_KEY is missing.
+        """
+        if not os.environ.get("FMP_API_KEY"):
+            return 0
+
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             all_transcript_dates = await self._load_transcript_dates(session)
             filtered_dates = self._filter_transcript_dates(all_transcript_dates, start_date, end_date)
             fiscal_years_needed = set(meta['fiscalYear'] for meta in filtered_dates)
@@ -213,7 +238,8 @@ class Company:
 
         tasks = []
 
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             for fiscal_year in range(self.start_year, self.end_year):
                 tasks.append(self._load_transcript_batch(fiscal_year=fiscal_year, session=session))
             # Await tasks while session is still open
@@ -223,21 +249,20 @@ class Company:
     async def _load_transcript_batch(self, fiscal_year: int, session: aiohttp.ClientSession) -> List[dict]:
         """Loads a batch of transcripts for a given fiscal year"""
         params = {"apikey": os.environ['FMP_API_KEY'], "year": f"{fiscal_year}"}
-        async with session.get(f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
-                               params=params) as response:
-            data = await response.json()
-
-            return data
+        async with session.get(
+            f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
+            params=params
+        ) as response:
+            return await response.json()
 
     async def _load_transcript_dates(self, session: aiohttp.ClientSession):
         """Loads all the dates for a given transcript"""
         params = {"apikey": os.environ['FMP_API_KEY'], "symbol": self.symbol}
-
-        async with session.get(f"https://financialmodelingprep.com/stable/earning-call-transcript-dates",
-                               params=params) as response:
-            data = await response.json()
-
-            return data
+        async with session.get(
+            f"https://financialmodelingprep.com/stable/earning-call-transcript-dates",
+            params=params
+        ) as response:
+            return await response.json()
 
     @staticmethod
     def _filter_transcript_dates(transcript_dates: List[dict], start_date: Optional[str],
