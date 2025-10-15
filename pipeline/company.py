@@ -2,9 +2,8 @@ import os
 import aiohttp
 import asyncio
 from datetime import date
-from tqdm.asyncio import tqdm
-from typing import List, Optional
-
+# Progress display removed for compatibility; simple asyncio gather used instead
+from typing import List, Optional, Dict
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
 
@@ -18,48 +17,57 @@ from pipeline.filings.filing_sixk import FilingSixK
 from pipeline.filings.filing_twentyf import FilingTwentyF
 from pipeline.transcripts.transcript import Transcript
 
+_company_sync_locks: Dict[str, asyncio.Lock] = {}
+_locks_lock = asyncio.Lock()
+
 
 class Company:
-    forms: List[str] = ["10-K", "10-Q", "8-K",
+    forms: List[str] = ["10-K", "10-Q",
+                        "8-K",
                         "DEF 14A",
                         "20-F", "6-K"]
 
     def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
-                 end_year: int = 2027):
-        self.symbol = symbol
+                 end_year: int = 2027, verbose: bool = True):
+        self.symbol = symbol.upper()
         self.database = database
         self.start_year = start_year
         self.end_year = end_year
+        self.verbose = verbose
 
         set_identity(edgar_user_agent)
         self.company = EdgarCompany(cik_or_ticker=self.symbol)
 
     async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
                      end_date: Optional[str] = None, include_earnings_transcripts: bool = False) -> int:
-        if self.company.not_found:
-            return 0
+        """
+        Upsert company filings and transcripts with concurrency protection.
 
-        company = await self._get_company()
-        if company is None:
-            return 0
+        Uses an asyncio.Lock per ticker to prevent multiple concurrent syncs
+        of the same company, which would cause redundant API calls to EDGAR and FMP.
+        """
+        lock = await self._get_company_lock(self.symbol)
 
-        synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
-                                                  end_date=end_date)
+        async with lock:
+            if self.company.not_found:
+                return 0
 
-        if include_earnings_transcripts:
-            await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
+            company = await self._get_company()
+            if company is None:
+                return 0
 
-        await self.on_sync_complete(company_id=company['id'])
+            synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
+                                                      end_date=end_date)
 
-        return synced_count
+            if include_earnings_transcripts:
+                await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
+
+            return synced_count
 
     async def on_sync_complete(self, company_id: int):
-        update_data = {"synced": True}
-
         if self.company.fiscal_year_end:
-            update_data["fiscal_year_end"] = self.company.fiscal_year_end
-
-        await self.database.table("companies").update(update_data).eq("id", company_id).execute()
+            await self.database.table("companies").update(
+                {"fiscal_year_end": self.company.fiscal_year_end}).eq("id", company_id).execute()
 
     async def _upsert_filings(self, company: dict, forms: Optional[List[str]] = None,
                               start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
@@ -79,16 +87,15 @@ class Company:
         tasks = [upsert_filing_async(filing) for filing in filings]
         synced = 0
 
-        with tqdm(total=len(filings), desc=f"Loading Edgar Filings for {self.symbol}") as pbar:
-            for coro in asyncio.as_completed(tasks):
-                if await coro:
-                    synced += 1
-                pbar.update(1)
+        # Execute tasks and count synced filings
+        results = await asyncio.gather(*tasks)
+        synced = sum(1 for r in results if r)
 
         return synced
 
     async def _get_company(self) -> Optional[dict]:
-        response = await self.database.table("companies").select("id,name,symbols,sector,industry").contains("symbols", self.symbol).limit(
+        response = await self.database.table("companies").select("id,name,symbols,sector,industry").contains("symbols",
+                                                                                                             self.symbol).limit(
             1).execute()
 
         if not response.data:
@@ -157,7 +164,7 @@ class Company:
             raise ValueError(f"Did not recognize form {filing.form}")
 
     async def _sync_transcripts(self, company: dict, start_date: Optional[str] = None,
-                               end_date: Optional[str] = None):
+                                end_date: Optional[str] = None):
         """Syncs earnings transcripts for the given date range (uses batch endpoint per fiscal year)"""
         async with aiohttp.ClientSession() as session:
             all_transcript_dates = await self._load_transcript_dates(session)
@@ -166,7 +173,8 @@ class Company:
 
             years_to_load = []
             for fiscal_year in fiscal_years_needed:
-                if not await self._are_all_transcripts_synced_for_year(company['id'], fiscal_year, all_transcript_dates):
+                if not await self._are_all_transcripts_synced_for_year(company['id'], fiscal_year,
+                                                                       all_transcript_dates):
                     years_to_load.append(fiscal_year)
 
             if not years_to_load:
@@ -208,17 +216,15 @@ class Company:
         async with aiohttp.ClientSession() as session:
             for fiscal_year in range(self.start_year, self.end_year):
                 tasks.append(self._load_transcript_batch(fiscal_year=fiscal_year, session=session))
-
-        transcript_data = await asyncio.gather(*tasks)
-
-        return transcript_data
+            # Await tasks while session is still open
+            transcript_data = await asyncio.gather(*tasks)
+            return transcript_data
 
     async def _load_transcript_batch(self, fiscal_year: int, session: aiohttp.ClientSession) -> List[dict]:
         """Loads a batch of transcripts for a given fiscal year"""
         params = {"apikey": os.environ['FMP_API_KEY'], "year": f"{fiscal_year}"}
         async with session.get(f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
                                params=params) as response:
-
             data = await response.json()
 
             return data
@@ -227,7 +233,8 @@ class Company:
         """Loads all the dates for a given transcript"""
         params = {"apikey": os.environ['FMP_API_KEY'], "symbol": self.symbol}
 
-        async with session.get(f"https://financialmodelingprep.com/stable/earning-call-transcript-dates", params=params) as response:
+        async with session.get(f"https://financialmodelingprep.com/stable/earning-call-transcript-dates",
+                               params=params) as response:
             data = await response.json()
 
             return data
@@ -282,3 +289,17 @@ class Company:
             meta['quarter'] == transcript_data['quarter']
             for meta in filtered_dates
         )
+
+    @staticmethod
+    async def _get_company_lock(ticker: str) -> asyncio.Lock:
+        """
+        Get or create an asyncio.Lock for the given ticker.
+
+        This prevents multiple Company instances from syncing the same ticker
+        concurrently, avoiding redundant EDGAR/FMP API calls.
+        """
+        ticker = ticker.upper()
+        async with _locks_lock:
+            if ticker not in _company_sync_locks:
+                _company_sync_locks[ticker] = asyncio.Lock()
+            return _company_sync_locks[ticker]

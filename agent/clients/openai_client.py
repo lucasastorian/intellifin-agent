@@ -1,3 +1,5 @@
+import os
+
 import openai
 from jiter import from_json
 from openai import AsyncStream
@@ -5,17 +7,25 @@ from typing import Literal, List
 
 from agent.actions import BaseAction
 from agent.message import Message, Action, Thought, WebSearch
+from agent.clients.base_client import BaseClient
 
 
-class OpenAIClient:
+class OpenAIClient(BaseClient):
 
     def __init__(self, model: str = "gpt-5", temperature: float = 1.0,
-                 reasoning_effort: Literal['minimal', 'low', 'medium', 'high'] = 'medium'):
+                 reasoning_effort: Literal['minimal', 'low', 'medium', 'high'] = 'medium',
+                 verbose: bool = True,
+                 tier: str = "tier-3"):
         self.model = model
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
+        self.verbose = verbose
+        self.tier = tier  # Not yet used for rate limiting, but reserved for future
 
-        self.client = openai.AsyncOpenAI()
+        self.client = openai.AsyncOpenAI(
+            base_url="https://api.openai.com/v1",
+            api_key=os.environ['OPENAI_API_KEY']
+        )
 
         self.tool_call_arguments = ""
 
@@ -68,7 +78,8 @@ class OpenAIClient:
 
                 if event.item.type == 'reasoning':
                     completion.thoughts.append(Thought(id=event.item.id, summaries=[], index=event.output_index))
-                    print(f"Thinking: \n\n", sep="", end="")
+                    if self.verbose:
+                        print(f"Thinking: \n\n", sep="", end="")
 
                 elif event.item.type == 'function_call':
                     self.tool_call_arguments = ""
@@ -83,21 +94,25 @@ class OpenAIClient:
                 elif event.item.type == 'web_search_call':
                     web_search = WebSearch(id=event.item.id, query="", index=event.output_index)
                     completion.web_searches.append(web_search)
-                    print("Searching Web: ", sep="", end="")
+                    if self.verbose:
+                        print("Searching Web: ", sep="", end="")
                     # print(event.item)
 
             elif event.type == 'response.reasoning_summary_part.added':
                 completion.thoughts[-1].summaries.append("")
-                print("- ", sep="", end="")
+                if self.verbose:
+                    print("- ", sep="", end="")
 
             elif event.type == 'response.reasoning_summary_text.delta':
                 completion.thoughts[-1].summaries[-1] += event.delta
-                print(event.delta, sep="", end="")
+                if self.verbose:
+                    print(event.delta, sep="", end="")
 
             elif event.type == 'response.reasoning_summary_text.done':
                 # Identical to previous summary deltas
                 completion.thoughts[-1].summaries[-1] = event.text
-                print("\n\n")
+                if self.verbose:
+                    print("\n\n")
 
             elif event.type == 'response.reasoning_summary_part.done':
                 # Identical to previous summary deltas
@@ -118,7 +133,8 @@ class OpenAIClient:
 
             elif event.type == 'response.output_text.delta':
                 completion.content += event.delta
-                print(event.delta, sep="", end="")
+                if self.verbose:
+                    print(event.delta, sep="", end="")
 
             elif event.type == 'response.output_text.done':
                 pass
@@ -130,13 +146,14 @@ class OpenAIClient:
 
                 if event.item.type == 'web_search_call':
                     completion.web_searches[-1].query = event.item.action.query
-                    print(f"{event.item.action.query}\n\n")
-                    # print(event.item)
+                    if self.verbose:
+                        print(f"{event.item.action.query}\n\n")
 
             elif event.type == 'response.completed':
                 usage = event.response.usage
 
-                completion.prompt_tokens = usage.input_tokens
+                completion.uncached_prompt_tokens = usage.input_tokens - usage.input_tokens_details.cached_tokens
+                completion.cached_prompt_tokens = usage.input_tokens_details.cached_tokens
                 completion.thinking_tokens = usage.output_tokens_details.reasoning_tokens
                 completion.completion_tokens = usage.output_tokens - completion.thinking_tokens
 

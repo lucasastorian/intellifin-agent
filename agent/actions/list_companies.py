@@ -73,7 +73,7 @@ class ListCompaniesAction(BaseAction):
                 break
 
         if not matches:
-            self.log_done("No companies found")
+            self.log_done("No companies found", content=f"No companies found matching '{args.query}'")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -86,7 +86,7 @@ class ListCompaniesAction(BaseAction):
         content = self._format_to_md(matches)
 
         summary = f"Found {len(matches)} compan{'y' if len(matches) == 1 else 'ies'}"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         return ActionResponse(
             message=Message(

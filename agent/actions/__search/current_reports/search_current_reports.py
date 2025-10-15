@@ -99,7 +99,7 @@ class SearchCurrentReportsAction(BaseAction):
         results = await self._search_current_reports(args, forms)
 
         if not results:
-            self.log_done("No matches found")
+            self.log_done("No matches found", content=f"No matching current reports for query '{args.query}'")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -120,7 +120,7 @@ class SearchCurrentReportsAction(BaseAction):
         content = self._format_results(results, attachments_by_filing)
 
         summary = f"Found {len(results)} current report(s)"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         all_filing_ids = [r['id'] for r in results]
         all_attachment_ids = [

@@ -55,7 +55,7 @@ class Evaluator:
                     "content": message
                 },
             ],
-            text_format=Evaluation
+            text_format=Evaluation,
         )
 
-        return response.parsed.answer_correct == 'Yes'
+        return response.output_parsed.answer_correct == 'Yes'

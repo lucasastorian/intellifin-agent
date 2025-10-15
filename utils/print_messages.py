@@ -1,6 +1,6 @@
 from typing import List
 
-from agent.message import Message, Action, WebSearch
+from agent.message import Message
 
 
 def _is_notebook():
@@ -38,6 +38,8 @@ def print_messages(messages: List[Message]):
             elif msg.role == "assistant":
                 output.append("### ASSISTANT\n")
                 if msg.content:
+                    if msg.num_tokens:
+                        output.append(f"<sub>tokens={msg.num_tokens}</sub>\n\n")
                     output.append(msg.content + "\n")
 
                 if msg.actions:
@@ -54,6 +56,9 @@ def print_messages(messages: List[Message]):
                 output.append("### TOOL\n")
                 if msg.error:
                     output.append("**ERROR**\n\n")
+                toks = getattr(msg, 'num_tokens', None)
+                if toks is not None:
+                    output.append(f"<sub>tokens={toks}</sub>\n\n")
                 output.append(msg.content + "\n")
 
         display(Markdown("".join(output)))
@@ -76,6 +81,8 @@ def print_messages(messages: List[Message]):
             elif msg.role == "assistant":
                 print("ASSISTANT:")
                 if msg.content:
+                    if msg.num_tokens:
+                        print(f"[tokens={msg.num_tokens}]")
                     print(msg.content)
 
                 if msg.actions:
@@ -92,6 +99,8 @@ def print_messages(messages: List[Message]):
                 print("TOOL:")
                 if msg.error:
                     print("ERROR")
+                if msg.num_tokens:
+                    print(f"[tokens={msg.num_tokens}]")
                 print(msg.content)
 
         print("\n" + "=" * 80)

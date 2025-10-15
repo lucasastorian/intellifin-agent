@@ -104,7 +104,7 @@ Available note IDs are from your curated search results."""
         if truncated:
             summary += " (truncated)"
 
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         return ActionResponse(
             message=Message(

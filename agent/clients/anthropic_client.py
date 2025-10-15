@@ -1,3 +1,4 @@
+import json
 import anthropic
 from jiter import from_json
 from anthropic import AsyncStream
@@ -5,17 +6,24 @@ from typing import Literal, List
 
 from agent.actions import BaseAction
 from agent.message import Message, Action, Thought
+from agent.clients.base_client import BaseClient
+from agent.utils.rate_limits import get_rate_limits
+from database.utils.rate_limiters.token_limiter import TokenRateLimiter
 
 
-class AnthropicClient:
+class AnthropicClient(BaseClient):
 
     max_tokens: int = 16384
     betas: List[str] = ["interleaved-thinking-2025-05-14"]
 
     def __init__(self, model: str = "claude-sonnet-4-5-20250929", temperature: float = 1.0,
-                 reasoning_effort: Literal['low', 'medium', 'high', 'none'] = 'medium'):
+                 reasoning_effort: Literal['low', 'medium', 'high', 'none'] = 'medium',
+                 verbose: bool = True,
+                 tier: str = "tier-3"):
         self.model = model
         self.temperature = temperature
+        self.verbose = verbose
+        self.tier = tier
         self.reasoning_budget = {
             "low": 1024,
             "medium": 2048,
@@ -25,19 +33,57 @@ class AnthropicClient:
 
         self.client = anthropic.AsyncAnthropic()
 
+        # Setup rate limiter (pass model for model-specific limits)
+        limits = get_rate_limits("anthropic", tier, model)
+        self.rate_limiter = TokenRateLimiter(
+            max_tokens=limits["tokens_per_minute"],
+            period=60
+        )
+
         self.tool_call_arguments = ""
 
+    def _count_tokens(self, messages: List[Message], system_prompt: str, actions: List[BaseAction]) -> int:
+        """
+        Estimate input tokens for Anthropic API request.
+
+        Includes: system prompt + messages + tool schemas
+
+        Uses tiktoken for token counting by concatenating all content into one string.
+        """
+        parts = []
+
+        # Add system prompt
+        parts.append(f"SYSTEM: {system_prompt}")
+
+        # Add all messages in anthropic format
+        for message in messages:
+            formatted = message.anthropic_format()
+            parts.append(json.dumps(formatted))
+
+        # Add all tool schemas
+        for action in actions:
+            tool_schema = action.anthropic_schema
+            parts.append(json.dumps(tool_schema))
+
+        # Concatenate everything
+        full_content = "\n".join(parts)
+
+        # Count tokens using tiktoken
+        return self.num_tokens(full_content)
+
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
-                     allowed_actions: List[BaseAction] = None):
+                     allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
         """Streams a completion with the given messages"""
-        messages = [message.anthropic_format() for message in messages]
+        estimated_tokens = self._count_tokens(messages, system_prompt, actions)
+
+        formatted_messages = [message.anthropic_format() for message in messages]
 
         params = {
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "system": system_prompt,
-            "messages": messages,
+            "messages": formatted_messages,
             "betas": self.betas,
             "tools": [action.anthropic_schema for action in actions],
             "stream": True
@@ -53,9 +99,16 @@ class AnthropicClient:
             params["tools"] = [action.anthropic_schema for action in allowed_actions]
             params['tool_choice'] = {"type": "tool"}
 
-        response = await self.client.messages.create(**params)
+        # Use rate limiter context manager (like VoyageClient pattern)
+        async with self.rate_limiter.context(estimated_tokens) as update_func:
+            response = await self.client.beta.messages.create(**params)
+            result = await self.stream_completion(response=response)
 
-        return await self.stream_completion(response=response)
+            # Update with actual input tokens from response
+            if hasattr(result, 'prompt_tokens') and result.prompt_tokens:
+                update_func(result.prompt_tokens)
+
+            return result
 
     async def stream_completion(self, response: AsyncStream):
         """Streams the Anthropic Completion"""
@@ -73,7 +126,7 @@ class AnthropicClient:
                 elif event.content_block.type == 'text':
                     pass
 
-                elif event.cont_block.type == 'tool_use':
+                elif event.content_block.type == 'tool_use':
                     self.tool_call_arguments = ""
                     action = Action(id=event.content_block.id, name=event.content_block.name,
                                     status="streaming", body={})
@@ -88,8 +141,11 @@ class AnthropicClient:
 
                 elif event.delta.type == 'input_json_delta':
                     self.tool_call_arguments += event.delta.partial_json
-                    body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
-                                          partial_mode="trailing-strings")
+                    try:
+                        body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
+                                              partial_mode="trailing-strings")
+                    except ValueError:
+                        continue
 
                     if type(body_json) is not dict:
                         continue
@@ -104,7 +160,8 @@ class AnthropicClient:
 
             elif event.type == 'message_delta':
                 usage = event.usage
-                completion.prompt_tokens = usage.input_tokens
+                completion.uncached_prompt_tokens = usage.input_tokens
+                # Anthropic doesn't provide thinking tokens as a separate line item.
                 completion.completion_tokens = usage.output_tokens
 
                 if completion.actions:

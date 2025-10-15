@@ -12,6 +12,7 @@ class ReadAttachment(BaseModel):
     - Returns pages separated by '---' markers
     - Page numbers start at 1
     - If end_page not specified, reads to the last page
+    - Hard limit: returns at most 20 pages (truncates if range is larger)
     """
     attachment_id: int = Field(..., description="The attachment ID to read")
     start_page: int = Field(1, description="Starting page number (1-indexed)", ge=1)
@@ -81,15 +82,19 @@ class ReadAttachmentAction(BaseAction):
         if end_page > num_pages:
             end_page = num_pages
 
+        # Enforce a hard cap of 20 pages per call
+        if end_page - args.start_page + 1 > 20:
+            end_page = args.start_page + 20 - 1
+
         # Load pages
         pages_result = await (
             self.database
             .table("filing_attachment_pages")
-            .select("page_number,content")
+            .select("page,content")
             .eq("attachment_id", args.attachment_id)
-            .gte("page_number", args.start_page)
-            .lte("page_number", end_page)
-            .order("page_number")
+            .gte("page", args.start_page)
+            .lte("page", end_page)
+            .order("page")
             .execute()
         )
 
@@ -107,7 +112,7 @@ class ReadAttachmentAction(BaseAction):
 
         # Build content with page separators
         header = f"**Attachment {args.attachment_id}** - EX-{attachment.get('exhibit_number', '?')}\n"
-        header += f"Type: {attachment.get('type', 'Unknown')} | Pages: {args.start_page}-{end_page} of {num_pages}\n\n"
+        header += f"Type: {attachment.get('type', 'Unknown')} | Pages: {args.start_page}-{end_page} of {num_pages} (max 20 per call)\n\n"
 
         pages = []
         for page_data in pages_result.data:
@@ -115,7 +120,7 @@ class ReadAttachmentAction(BaseAction):
 
         content = header + "\n\n---\n\n".join(pages)
 
-        self.log_done(f"Read {len(pages)} pages")
+        self.log_done(f"Read {len(pages)} pages", content=content)
 
         return ActionResponse(
             message=Message(

@@ -73,7 +73,7 @@ class PlanAction(BaseAction):
 
         content = "".join(content_parts)
 
-        self.log_done(f"Plan created")
+        self.log_done(f"Plan created", content=content)
 
         return ActionResponse(
             message=Message(

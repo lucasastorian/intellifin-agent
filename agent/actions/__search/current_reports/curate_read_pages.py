@@ -139,7 +139,7 @@ This curation reduces context size and improves accuracy for subsequent analysis
             refined_content = None
             summary = "No curation applied"
 
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         return ActionResponse(
             message=Message(

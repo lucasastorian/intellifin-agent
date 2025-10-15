@@ -90,7 +90,7 @@ class ReadFilingAction(BaseAction):
         content = self._format_filing_overview(filing, attachments, notes)
 
         summary = f"Retrieved overview for {filing['form']} filing"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         # Create follow-up actions with siblings pattern
         attachment_ids = [att['id'] for att in attachments]

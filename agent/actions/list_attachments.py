@@ -74,7 +74,7 @@ class ListAttachmentsAction(BaseAction):
         )
 
         if not attachments_result.data:
-            self.log_done("No attachments found")
+            self.log_done("No attachments found", content=f"No attachments found for filing {args.filing_id} ({filing['form']}, {filing['filing_date']}).")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -100,7 +100,7 @@ class ListAttachmentsAction(BaseAction):
         df = pd.DataFrame(rows, columns=["id", "exhibit_number", "type", "pages"])
         content = header + df.to_markdown(index=False)
 
-        self.log_done(f"Found {len(rows)} attachments")
+        self.log_done(f"Found {len(rows)} attachments", content=content)
 
         return ActionResponse(
             message=Message(

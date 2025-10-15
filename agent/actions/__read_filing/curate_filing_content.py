@@ -118,7 +118,7 @@ Choose 'keep' when you need the full details. Choose 'summarize' for high-level 
                 refined_content = f"**[Summarized Note]**\n\n{args.summary}\n\n*Note: Original content replaced with summary by curation step to reduce context size.*"
                 summary_msg = "Summarized note content"
 
-        self.log_done(summary_msg)
+        self.log_done(summary_msg, content=content)
 
         response = ActionResponse(
             message=Message(

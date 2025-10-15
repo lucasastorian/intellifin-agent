@@ -200,7 +200,7 @@ class SemanticSearchAction(BaseAction):
             all_results.extend(results)
 
         if not all_results:
-            self.log_done("No matches found")
+            self.log_done("No matches found", content="No matching results found.")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -216,7 +216,7 @@ class SemanticSearchAction(BaseAction):
         content = self._format_results(top_results)
 
         summary = f"Found {len(top_results)} excerpt(s) across {len({r.get('filing_id') or r.get('transcript_id') for r in top_results})} document(s)"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         return ActionResponse(
             message=Message(

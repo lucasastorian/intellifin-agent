@@ -176,7 +176,7 @@ class ReadFilingAction(BaseAction):
         if truncated:
             summary += " (truncated)"
 
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         # Create message with ID for curation to reference
         read_message_id = str(uuid.uuid4())

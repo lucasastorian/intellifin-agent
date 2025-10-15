@@ -100,7 +100,7 @@ class ViewFinancialStatementsAction(BaseAction):
             )
 
             if not result.data:
-                self.log_done("No financial statements found")
+                self.log_done("No financial statements found", content="")
                 return ActionResponse(
                     message=Message(
                         role="tool",
@@ -121,7 +121,7 @@ class ViewFinancialStatementsAction(BaseAction):
             merged_df = merger.merge()
 
             if merged_df.empty:
-                self.log_done("No data after filtering")
+                self.log_done("No data after filtering", content="")
                 return ActionResponse(
                     message=Message(
                         role="tool",
@@ -134,7 +134,7 @@ class ViewFinancialStatementsAction(BaseAction):
             content = self._format_as_markdown(merged_df, args.symbol, args.statement_type, args.report_type)
 
             period_cols = [col for col in merged_df.columns if col not in ['concept', 'label', 'level', 'axis', 'dimension']]
-            self.log_done(f"Merged {len(period_cols)} period(s)")
+            self.log_done(f"Merged {len(period_cols)} period(s)", content=content)
             return ActionResponse(
                 message=Message(role="tool", status="completed", content=content, action_id=action.id)
             )

@@ -40,9 +40,10 @@ class Message:
 
     action_id: str = None  # tool call id for tool messages
 
-    prompt_tokens: int = None
-    thinking_tokens: int = None
-    completion_tokens: int = None
+    cached_prompt_tokens: int = None  # The total number of tokens used for the prompt
+    uncached_prompt_tokens: int = None  # The number of tokens of 'prompt_tokens' that were cached
+    thinking_tokens: int = None  # The total number of tokens used to 'think'
+    completion_tokens: int = None  # The total number of tokens for the final completion (tools calls + text)
 
     external_id: str = None
     content_index: int = None
@@ -50,10 +51,17 @@ class Message:
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
+    @property
+    def num_tokens(self) -> int:
+        import tiktoken
+        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        return len(encoding.encode(self.content))
+
     def anthropic_format(self) -> dict:
         """Formats a message for the Anthropic Client"""
         if self.role == "tool":
-            return {"type": "tool_result", "tool_use_id": self.action_id, "content": self.content}
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": self.action_id,
+                                                 "content": self.content}]}
 
         elif self.role == "assistant":
             content_blocks = []

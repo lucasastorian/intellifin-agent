@@ -1,5 +1,6 @@
 import os
 import sys
+import tiktoken
 from typing import List, Set, Optional
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
@@ -16,10 +17,11 @@ class BaseAction(ABC):
     name: str
     schema: BaseModel
 
-    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2017):
+    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2017, verbose: bool = True):
         self.database = database
         self.edgar_user_agent = edgar_user_agent
         self.start_year = start_year
+        self.verbose = verbose
 
     @abstractmethod
     async def call(self, action: Action) -> ActionResponse:
@@ -42,7 +44,7 @@ class BaseAction(ABC):
 
         for symbol in symbols:
             company = Company(symbol=symbol, database=self.database, edgar_user_agent=self.edgar_user_agent,
-                              start_year=self.start_year)
+                              start_year=self.start_year, verbose=self.verbose)
 
             # Build sync description
             sync_desc = symbol
@@ -60,15 +62,17 @@ class BaseAction(ABC):
 
             # Only show sync message if filings were actually synced
             if synced_count > 0:
-                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}",
-                      flush=True)
+                if self.verbose:
+                    print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}",
+                          flush=True)
             elif synced_count == 0 and not company.company.not_found:
                 # Company found but nothing to sync (all already synced)
                 pass  # No message
             else:
                 # Company not found
-                print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
-                      flush=True)
+                if self.verbose:
+                    print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
+                          flush=True)
                 not_found.append(symbol)
 
         return not_found
@@ -103,19 +107,26 @@ class BaseAction(ABC):
 
     def log_start(self, action: str, params: str = "", thought: str = ""):
         """Log action start with name and parameters"""
-        print(f"\n{self._c(action, 'cyan')}", flush=True)
-        if thought:
-            print(f"  {self._c('💭', 'magenta')} {thought}", flush=True)
-        if params:
-            print(f"  {self._c('→', 'dim')} {params}", flush=True)
+        if self.verbose:
+            print(f"\n{self._c(action, 'cyan')}", flush=True)
+            if thought:
+                print(f"  {self._c('💭', 'magenta')} {thought}", flush=True)
+            if params:
+                print(f"  {self._c('→', 'dim')} {params}", flush=True)
 
-    def log_done(self, result: str = ""):
-        """Log successful completion with result summary"""
-        print(f"  {self._c('✓', 'green')} {result}", flush=True)
+    def log_done(self, result: str, content: str):
+        """Log successful completion with result summary, including token count of content when verbose"""
+        if self.verbose:
+            try:
+                tokens = self.num_tokens(content or "")
+            except Exception:
+                tokens = 0
+            print(f"  {self._c('✓', 'green')} {result} | tokens={tokens}", flush=True)
 
     def log_error(self, error: str = ""):
         """Log error with message"""
-        print(f"  {self._c('✗', 'red')} {error}", flush=True)
+        if self.verbose:
+            print(f"  {self._c('✗', 'red')} {error}", flush=True)
 
     @property
     def openai_legacy_schema(self) -> dict:
@@ -165,3 +176,8 @@ class BaseAction(ABC):
                 "required": json_schema.get('required', [])
             }
         }
+
+    @staticmethod
+    def num_tokens(content: str) -> int:
+        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        return len(encoding.encode(content))

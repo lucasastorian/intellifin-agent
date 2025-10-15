@@ -12,6 +12,7 @@ class ReadFiling(BaseModel):
     - Returns pages separated by '---' markers
     - Page numbers start at 1
     - If end_page not specified, reads to the last page
+    - Hard limit: returns at most 20 pages (truncates if range is larger)
     """
     filing_id: int = Field(..., description="The filing ID to read")
     start_page: int = Field(1, description="Starting page number (1-indexed)", ge=1)
@@ -82,15 +83,19 @@ class ReadFilingAction(BaseAction):
         if end_page > num_pages:
             end_page = num_pages
 
+        # Enforce a hard cap of 20 pages per call
+        if end_page - args.start_page + 1 > 20:
+            end_page = args.start_page + 20 - 1
+
         # Load pages
         pages_result = await (
             self.database
             .table("company_filing_pages")
-            .select("page_number,content")
+            .select("page,content")
             .eq("filing_id", args.filing_id)
-            .gte("page_number", args.start_page)
-            .lte("page_number", end_page)
-            .order("page_number")
+            .gte("page", args.start_page)
+            .lte("page", end_page)
+            .order("page")
             .execute()
         )
 
@@ -108,7 +113,7 @@ class ReadFilingAction(BaseAction):
 
         # Build content with page separators
         header = f"**{filing['company_name']}** - {filing['form']} ({filing['filing_date']})\n"
-        header += f"Pages: {args.start_page}-{end_page} of {num_pages}\n\n"
+        header += f"Pages: {args.start_page}-{end_page} of {num_pages} (max 20 per call)\n\n"
 
         pages = []
         for page_data in pages_result.data:
@@ -116,7 +121,7 @@ class ReadFilingAction(BaseAction):
 
         content = header + "\n\n---\n\n".join(pages)
 
-        self.log_done(f"Read {len(pages)} pages")
+        self.log_done(f"Read {len(pages)} pages", content=content)
 
         return ActionResponse(
             message=Message(

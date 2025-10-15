@@ -1,69 +1,65 @@
 import asyncio
 import argparse
 import logging
-import signal
-import atexit
+from typing import Literal
 from dotenv import load_dotenv
+
 from agent.agent import Agent
-from agent.agent_config import AgentMode
+from agent.clients.openai_client import OpenAIClient
+from agent.clients.anthropic_client import AnthropicClient
 from utils.print_messages import print_messages
-
-_agent_instance = None
-
-
-def cleanup_handler():
-    """Cleanup handler called on exit or signal."""
-    if _agent_instance and hasattr(_agent_instance, 'database'):
-        try:
-            _agent_instance.database.close()
-        except Exception:
-            pass
+from utils.run_summary import print_run_summary
 
 
-def signal_handler(signum, frame):
-    """Handle SIGINT and SIGTERM gracefully."""
-    print(f"\nReceived signal {signum}, shutting down gracefully...")
-    cleanup_handler()
-    exit(0)
+def run_agent(query: str, user_agent: str, model: str, max_iter: int,
+              reasoning_effort: Literal['minimal', 'low', 'medium', 'high']):
+    """Runs the agent"""
+    if model in ['gpt-5', 'gpt-5-mini']:
+        client = OpenAIClient(
+            model=model,
+            temperature=1.0,
+            reasoning_effort=reasoning_effort
+        )
+
+    elif args.model in ['claude-sonnet-4.5', 'claude-opus-4-1']:
+        client = AnthropicClient(
+            model=model,
+            temperature=1.0,
+            reasoning_effort="medium"
+        )
+    else:
+        raise ValueError(f"Did not recognize model {args.model}")
+
+    agent = Agent(
+        edgar_user_agent=user_agent,
+        client=client,
+        max_iter=max_iter
+    )
+
+    asyncio.run(agent.run(query=query))
+    print_messages(messages=agent.messages)
+    print_run_summary(agent=agent)
 
 
 if __name__ == '__main__':
     load_dotenv()
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(cleanup_handler)
-
     logging.getLogger('edgar.core').setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description='Run the IntelliFin agent')
     parser.add_argument('--query', type=str, help='Query to send to the agent',
-                        default='''How has Netflix's (NASDAQ: NFLX) Average Revenue Per Paying User Changed from 2019 to 2024?''')
-    parser.add_argument('--model', type=str, default='gpt-5', help='Model to use (default: gpt-5)')
+                        default='''What's Boeing's effective tax rate in 2024?''')
+    parser.add_argument('--user-agent', type=str)
+
+    parser.add_argument('--model', type=str, default='gpt-5',
+                        choices=['gpt-5', 'gpt-5-mini', 'claude-sonnet-4.5', 'claude-opus-4-1'],
+                        help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='minimal',
                         choices=['minimal', 'low', 'medium', 'high'],
                         help='Reasoning effort level (default: minimal)')
-    parser.add_argument('--mode', type=str, default='full_no_web',
-                        choices=['basic', 'web_search', 'web_code', 'full', 'full_no_web'],
-                        help='Agent mode: basic (no tools), web_search (web only), web_code (web+code), '
-                             'full (all tools+web), full_no_web (all tools, no web) (default: full_no_web)')
 
     args = parser.parse_args()
 
-    agent = Agent(
-        edgar_user_agent="Lucas Astorian <lucas@intellifin.ai>",
-        model=args.model,
-        max_iter=args.max_iter,
-        reasoning_effort=args.reasoning_effort,
-        mode=AgentMode(args.mode)
-    )
-
-    _agent_instance = agent
-
-    try:
-        asyncio.run(agent.run(query=args.query))
-    finally:
-        cleanup_handler()
-
-    print_messages(agent.messages)
+    run_agent(query=args.query, user_agent=args.user_agent, model=args.model, max_iter=args.max_iter,
+              reasoning_effort=args.reasoning_effort)

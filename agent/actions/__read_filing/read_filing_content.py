@@ -127,7 +127,7 @@ Page ranges are 0-indexed and exclusive on the end (e.g., start_page=0, end_page
 
         content, pages_read = result
 
-        self.log_done(f"Retrieved {args.document} content")
+        self.log_done(f"Retrieved {args.document} content", content=content)
 
         read_message_id = str(uuid.uuid4())
         read_message = Message(

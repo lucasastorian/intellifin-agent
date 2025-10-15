@@ -102,7 +102,7 @@ class SearchFilingNotesAction(BaseAction):
         results = await self._search_filing_notes(args)
 
         if not results:
-            self.log_done("No matches found")
+            self.log_done("No matches found", content=f"No filing note matches for query '{args.query}'")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -123,7 +123,7 @@ class SearchFilingNotesAction(BaseAction):
         unique_notes = len({r['filing_note_id'] for r in top_results})
         unique_filings = len({r['filing_id'] for r in top_results})
         summary = f"Found {len(top_results)} excerpt(s) from {unique_notes} note(s) across {unique_filings} filing(s)"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         search_message_id = str(uuid.uuid4())
 

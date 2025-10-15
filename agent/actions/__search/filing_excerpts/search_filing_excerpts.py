@@ -121,7 +121,7 @@ class SearchFilingSectionsAction(BaseAction):
         results = await self._search_filing_sections(args, forms)
 
         if not results:
-            self.log_done("No matches found")
+            self.log_done("No matches found", content=f"No filing excerpt matches for query '{args.query}'")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -141,7 +141,7 @@ class SearchFilingSectionsAction(BaseAction):
 
         unique_filings = len({r['filing_id'] for r in top_results})
         summary = f"Found {len(top_results)} excerpt(s) across {unique_filings} filing(s)"
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         search_message_id = str(uuid.uuid4())
 

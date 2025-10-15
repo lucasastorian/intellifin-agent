@@ -123,7 +123,7 @@ After curation, you can optionally read full notes if any excerpts were truncate
             confirmation = "Context refined (filing note results not relevant)."
             follow_up = None
 
-        self.log_done(f"Curated to {len(selected_ids) if selected_ids else 0} excerpts")
+        self.log_done(f"Curated to {len(selected_ids) if selected_ids else 0} excerpts", content=content)
 
         return ActionResponse(
             message=Message(

@@ -104,7 +104,7 @@ class ListFilingsAction(BaseAction):
         filings_result = await qb.order("filing_date", desc=True).limit(50).execute()
 
         if not filings_result.data:
-            self.log_done("No filings found")
+            self.log_done("No filings found", content="No filings in the requested range.")
             return ActionResponse(
                 message=Message(
                     role="tool",
@@ -137,7 +137,7 @@ class ListFilingsAction(BaseAction):
         if len(companies) <= 3:
             summary += f" ({', '.join(sorted(companies))})"
 
-        self.log_done(summary)
+        self.log_done(summary, content=content)
 
         return ActionResponse(
             message=Message(

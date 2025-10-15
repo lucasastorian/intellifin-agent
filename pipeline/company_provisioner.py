@@ -10,7 +10,7 @@ from edgar import Company as EdgarCompany, set_identity
 class CompanyProvisioner:
     SEC_MAPPING_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 
-    def __init__(self, database: Database, edgar_user_agent: str, path: str = "./data/us_listed_stocks.csv"):
+    def __init__(self, database: Database, edgar_user_agent: str, path: str = "./datasets/us_listed_stocks.csv"):
         self.database = database
         self.edgar_user_agent = edgar_user_agent
         self.csv_path = path

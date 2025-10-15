@@ -2,17 +2,17 @@ from typing import List, Optional
 
 from schema import schema
 from database import Database
-from agent.action_response import ActionResponse, ActionFollowUp
+from agent.action_response import ActionFollowUp
 from pipeline.company_provisioner import CompanyProvisioner
 from agent.system_prompt import SystemPrompt
 from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
-from agent.clients.openai_client import OpenAIClient
-from agent.agent_config import AgentMode, get_agent_config
-from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction, ReadFilingAction, ReadAttachmentAction,
-                           SearchPressReleasesAction, SearchCurrentReportsAction, SearchFilingNotesActionNew,
-                           ViewFinancialStatementsAction, PythonExecAction, PlanAction, SearchFilingSectionsAction,
-                           SemanticSearchAction, )
+from agent.clients.base_client import BaseClient
+from agent.utils.usage import Usage
+from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction,
+                           ReadFilingAction,  ReadAttachmentAction, ViewFinancialStatementsAction,
+                           PythonExecAction, PlanAction,
+                           SemanticSearchAction, SearchFilingAction)
 
 
 class Agent:
@@ -20,25 +20,16 @@ class Agent:
     start_year: int = 2018
     enable_web_search: bool = False
 
-    def __init__(self, edgar_user_agent: str, model: str = "gpt-5", temperature: float = 1.0, max_iter: int = 20,
-                 reasoning_effort: str = "medium"):
+    def __init__(self, edgar_user_agent: str, client: BaseClient, max_iter: int = 20, verbose: bool = True):
         self.edgar_user_agent = edgar_user_agent
-        self.client = OpenAIClient(model=model, temperature=temperature, reasoning_effort=reasoning_effort)
+        self.client = client
         self.num_iter = 0
         self.max_iter = max_iter
-        self.messages = []
+        self.verbose = verbose
+        self.messages: List[Message] = []
         self._initialized = False
 
         self.database = Database(schema=schema, base_path="./data/intellifin.db")
-
-    async def _initialize(self):
-        """Async initialization - provisions companies database if needed"""
-        if self._initialized:
-            return
-
-        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
-        await provisioner.provision()
-        self._initialized = True
 
     async def run(self, query: str) -> Optional[str]:
         """Orchestrates agent iterations (horizontal limit via max_iter)"""
@@ -48,30 +39,33 @@ class Agent:
 
         base_actions = [
             # Create a plan
-            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
 
             # Company search and filing listings
-            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
 
-            # Read individual filings & their attachments
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
-            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            # Read / search individual filings & their attachments
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            SearchFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
 
             # View the financial statements of a company - across filings (including Q3 inference for quarterly financials)
-            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
 
             # Execute Python code to calculate returns / CAGR / etc.
-            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
 
             # Search across all filings / earnings transcripts for a company semantically.
-            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent),
+            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+
         ]
 
         dynamic_actions = []
 
         while self.num_iter < self.max_iter:
+
             optional_actions = await self.navigate_sequence(
                 actions=base_actions + dynamic_actions,
                 depth=0
@@ -81,7 +75,6 @@ class Agent:
                 return self.messages[-1].content
 
             dynamic_actions = optional_actions
-            self.num_iter += 1
 
         return None
 
@@ -113,20 +106,21 @@ class Agent:
 
                 if recursive_optional:
                     optional_actions.extend(recursive_optional)
+
             else:
                 optional_actions.extend(follow_up.actions)
 
         return optional_actions
 
-    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[
-        List[ActionFollowUp]]:
+    async def step(self, actions: List[BaseAction], allowed_actions: List[BaseAction] = None) -> Optional[List[ActionFollowUp]]:
         """Executes a single step in the agent loop"""
-        # print(self.messages)
         completion = await self.client.stream(messages=self.messages, system_prompt=SystemPrompt().format(),
                                               actions=actions, allowed_actions=allowed_actions,
-                                              enable_web_search=self.config.enable_web_search)
+                                              enable_web_search=False)
         self.messages.append(completion)
         follow_ups = await self._call_actions(completion=completion, actions=actions)
+
+        self.num_iter += 1
 
         return follow_ups
 
@@ -180,3 +174,32 @@ class Agent:
                 error=True
             )
         )
+
+    @property
+    def usage(self) -> Usage:
+        """Calculate total token usage from all messages."""
+        usage = Usage(cached_input_tokens=0, uncached_input_tokens=0, thinking_tokens=0, completion_tokens=0)
+
+        for message in self.messages:
+            if message.uncached_prompt_tokens:
+                usage.uncached_prompt_tokens += message.uncached_prompt_tokens
+
+            if message.cached_prompt_tokens:
+                usage.cached_prompt_tokens += message.cached_prompt_tokens
+
+            if message.thinking_tokens:
+                usage.thinking_tokens += message.thinking_tokens
+
+            if message.completion_tokens:
+                usage.completion_tokens += message.completion_tokens
+
+        return usage
+
+    async def _initialize(self):
+        """Async initialization - provisions companies database if needed"""
+        if self._initialized:
+            return
+
+        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
+        await provisioner.provision()
+        self._initialized = True

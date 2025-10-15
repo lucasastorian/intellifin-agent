@@ -112,7 +112,7 @@ Your selection will modify the previous search message to reduce token usage and
             replacement_content = "Search results not relevant (see curation summary)."
             confirmation = "Context refined (search results not relevant)."
 
-        self.log_done(f"Curated to {len(selected_ids) if selected_ids else 0} excerpts")
+        self.log_done(f"Curated to {len(selected_ids) if selected_ids else 0} excerpts", content=content)
 
         return ActionResponse(
             message=Message(
