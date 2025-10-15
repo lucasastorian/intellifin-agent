@@ -5,10 +5,12 @@ from typing import Literal
 from dotenv import load_dotenv
 
 from agent.agent import Agent
-from agent.clients.openai_client import OpenAIClient
-from agent.clients.anthropic_client import AnthropicClient
+from database import Database
+from schema import schema
+from agent.clients import OpenAIClient, AnthropicClient, XAIClient
 from utils.print_messages import print_messages
 from utils.run_summary import print_run_summary
+from pipeline.company_provisioner import CompanyProvisioner
 
 
 def run_agent(query: str, user_agent: str, model: str, max_iter: int,
@@ -21,16 +23,30 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
             reasoning_effort=reasoning_effort
         )
 
-    elif args.model in ['claude-sonnet-4.5', 'claude-opus-4-1']:
+    elif args.model in ['claude-sonnet-4-5', 'claude-opus-4-1']:
         client = AnthropicClient(
             model=model,
             temperature=1.0,
-            reasoning_effort="medium"
+            reasoning_effort=reasoning_effort
         )
+
+    elif args.model == 'grok-4':
+        client = XAIClient(
+            model=model,
+            temperature=1.0,
+            reasoning_effort=reasoning_effort
+        )
+
     else:
         raise ValueError(f"Did not recognize model {args.model}")
 
+    database = Database(schema=schema, base_path="./data/intellifin.db")
+
+    provisioner = CompanyProvisioner(database=database, edgar_user_agent=user_agent)
+    provisioner.provision()
+
     agent = Agent(
+        database=database,
         edgar_user_agent=user_agent,
         client=client,
         max_iter=max_iter
@@ -52,7 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--user-agent', type=str)
 
     parser.add_argument('--model', type=str, default='gpt-5',
-                        choices=['gpt-5', 'gpt-5-mini', 'claude-sonnet-4.5', 'claude-opus-4-1'],
+                        choices=['gpt-5', 'gpt-5-mini', 'claude-sonnet-4-5', 'claude-opus-4-1', 'grok-4'],
                         help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='minimal',

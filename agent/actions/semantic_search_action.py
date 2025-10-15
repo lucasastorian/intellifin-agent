@@ -165,7 +165,6 @@ class SemanticSearchAction(BaseAction):
             "earnings_transcripts" in args.document_types
         )
 
-        # Debug: isolate potential hang during sync
         if self.verbose:
             print("  → Syncing symbols before search...", flush=True)
 
@@ -204,10 +203,13 @@ class SemanticSearchAction(BaseAction):
         if "earnings_transcript" in args.document_types or "earnings_transcripts" in args.document_types:
             tasks.append(self._search_transcript_chunks(args))
 
-        results_list = await asyncio.gather(*tasks)
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_results = []
-        for results in results_list:
+        for idx, results in enumerate(results_list):
+            if isinstance(results, Exception):
+                self.log_error(f"Search task {idx} error: {results}")
+                continue
             all_results.extend(results)
 
         if not all_results:

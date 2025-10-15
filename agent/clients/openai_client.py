@@ -12,6 +12,8 @@ from agent.clients.base_client import BaseClient
 
 class OpenAIClient(BaseClient):
 
+    provider: str = "OpenAI"
+
     def __init__(self, model: str = "gpt-5", temperature: float = 1.0,
                  reasoning_effort: Literal['minimal', 'low', 'medium', 'high'] = 'medium',
                  verbose: bool = True,

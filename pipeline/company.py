@@ -50,10 +50,14 @@ class Company:
 
         async with lock:
             if self.company.not_found:
+                if self.verbose:
+                    print(f"    • Company not found on EDGAR: {self.symbol}", flush=True)
                 return 0
 
             company = await self._get_company()
             if company is None:
+                if self.verbose:
+                    print(f"    • Company missing from local DB: {self.symbol}", flush=True)
                 return 0
 
             synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
@@ -73,6 +77,13 @@ class Company:
                               start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
         filings = await self._load_filings(forms=forms, start_date=start_date, end_date=end_date)
 
+        if self.verbose:
+            try:
+                count_hint = len(filings)
+            except Exception:
+                count_hint = 'unknown'
+            print(f"      · Loaded filings: {count_hint}", flush=True)
+
         if start_date or end_date:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
 
@@ -81,21 +92,55 @@ class Company:
                 return False
 
             parser = self._get_filing_parser(filing=filing, company=company)
-            await parser.upsert()
+
+            try:
+                await asyncio.wait_for(parser.upsert(), timeout=300)
+            except asyncio.TimeoutError:
+                if self.verbose:
+                    print(f"          ⚠ Timeout upserting {filing.accession_number}", flush=True)
+                return False
+
             return True
 
         tasks = [upsert_filing_async(filing) for filing in filings]
         synced = 0
 
-        # Execute tasks and count synced filings
-        results = await asyncio.gather(*tasks)
-        synced = sum(1 for r in results if r)
+        pbar = None
+        if self.verbose:
+            try:
+                from tqdm import tqdm
+                pbar = tqdm(total=len(tasks), desc=f"Sync {self.symbol} filings", unit="filing")
+            except Exception:
+                pbar = None
+
+        for coro in asyncio.as_completed(tasks):
+            try:
+                r = await coro
+                if r:
+                    synced += 1
+            except Exception as e:
+                if self.verbose:
+                    msg = f"          ⚠ Filing task error: {e}"
+                    if pbar is not None:
+                        try:
+                            from tqdm import tqdm as _tqdm
+                            _tqdm.write(msg)
+                        except Exception:
+                            print(msg, flush=True)
+                    else:
+                        print(msg, flush=True)
+            finally:
+                if pbar is not None:
+                    pbar.update(1)
+
+        if pbar is not None:
+            pbar.close()
 
         return synced
 
     async def _get_company(self) -> Optional[dict]:
-        response = await self.database.table("companies").select("id,name,symbols,sector,industry").contains("symbols",
-                                                                                                             self.symbol).limit(
+        response = await self.database.table(
+            "companies").select("id,name,cik,symbols,sector,industry").contains("symbols", self.symbol).limit(
             1).execute()
 
         if not response.data:
@@ -113,20 +158,20 @@ class Company:
         """
         forms_to_load = forms if forms else self.forms
 
-        # Compute minimal year list if date filters provided
         if start_date or end_date:
             start_year = date.fromisoformat(start_date).year if start_date else self.start_year
             end_year = date.fromisoformat(end_date).year if end_date else (self.end_year - 1)
             start_year = max(start_year, self.start_year)
             end_year = min(end_year, self.end_year - 1)
             years = list(range(start_year, end_year + 1)) if start_year <= end_year else []
+
         else:
             years = list(range(self.start_year, self.end_year))
 
-        # Offload blocking EDGAR call
-        return await asyncio.to_thread(self.company.get_filings, form=forms_to_load, year=years)
+        return self.company.get_filings(form=forms_to_load, year=years)
 
-    def _filter_filings_by_date(self, filings: EntityFilings, start_date: Optional[str] = None,
+    @staticmethod
+    def _filter_filings_by_date(filings: EntityFilings, start_date: Optional[str] = None,
                                 end_date: Optional[str] = None) -> List[EntityFiling]:
         """Filter filings by report_date range (fallback to filing_date if report_date missing)"""
         filtered = []
@@ -195,6 +240,10 @@ class Company:
             all_transcript_dates = await self._load_transcript_dates(session)
             filtered_dates = self._filter_transcript_dates(all_transcript_dates, start_date, end_date)
             fiscal_years_needed = set(meta['fiscalYear'] for meta in filtered_dates)
+            if self.verbose:
+                print(
+                    f"      · Transcripts available: {len(all_transcript_dates)} | in range: {len(filtered_dates)} | years: {sorted(fiscal_years_needed)}",
+                    flush=True)
 
             years_to_load = []
             for fiscal_year in fiscal_years_needed:
@@ -206,7 +255,7 @@ class Company:
                 return 0
 
             tasks = [self._load_transcript_batch(fiscal_year, session) for fiscal_year in years_to_load]
-            batch_results = await asyncio.gather(*tasks)
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             upsert_tasks = []
             for batch_data in batch_results:
@@ -242,7 +291,6 @@ class Company:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for fiscal_year in range(self.start_year, self.end_year):
                 tasks.append(self._load_transcript_batch(fiscal_year=fiscal_year, session=session))
-            # Await tasks while session is still open
             transcript_data = await asyncio.gather(*tasks)
             return transcript_data
 
@@ -250,8 +298,8 @@ class Company:
         """Loads a batch of transcripts for a given fiscal year"""
         params = {"apikey": os.environ['FMP_API_KEY'], "year": f"{fiscal_year}"}
         async with session.get(
-            f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
-            params=params
+                f"https://financialmodelingprep.com/api/v4/batch_earning_call_transcript/{self.symbol}",
+                params=params
         ) as response:
             return await response.json()
 
@@ -259,8 +307,8 @@ class Company:
         """Loads all the dates for a given transcript"""
         params = {"apikey": os.environ['FMP_API_KEY'], "symbol": self.symbol}
         async with session.get(
-            f"https://financialmodelingprep.com/stable/earning-call-transcript-dates",
-            params=params
+                f"https://financialmodelingprep.com/stable/earning-call-transcript-dates",
+                params=params
         ) as response:
             return await response.json()
 

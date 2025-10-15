@@ -5,14 +5,14 @@ Prices are in USD per 1 million tokens.
 """
 
 PRICING = {
-    "anthropic": {
+    "Anthropic": {
         "claude-sonnet-4-5": {
             "input_per_million": 3.0,
             "output_per_million": 15.0,
             "cached_input_per_million": 0.3,
         },
     },
-    "openai": {
+    "OpenAI": {
         "gpt-5": {
             "input_per_million": 1.25,
             "output_per_million": 10,

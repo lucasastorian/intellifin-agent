@@ -16,28 +16,28 @@ class FilingTenK(BaseFiling):
         """Upserts the 10-K filing and associated pages"""
         xbrl = await self._load_xbrl()
 
-        if xbrl is None:
-            logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
+        # if xbrl is None:
+        #     logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         # Filing and core document pages
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        # Core filing sections + upsert section chunks
-        sections = await self._upsert_filing_section_pages(pages=pages, filing=filing, filing_type='10-K')
-        section_chunk_task = self._upsert_filing_section_chunks(sections=sections, filing=filing)
-
         # Financial Statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
-        # Filing notes and filing note chunks
-        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        filing_note_chunk_task = self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        # Use transaction to batch all embeddings from chunks/notes/attachments
+        async with self.database.transaction():
+            # Core filing sections + section chunks
+            sections = await self._upsert_filing_section_pages(pages=pages, filing=filing, filing_type='10-K')
+            await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
-        # Upsert attachments
-        attachment_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+            # Filing notes and note chunks
+            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
-        _, _, attachment_data = await asyncio.gather(section_chunk_task, filing_note_chunk_task, attachment_task)
+            # Attachments and attachment chunks
+            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata updates + mark filing as synced
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

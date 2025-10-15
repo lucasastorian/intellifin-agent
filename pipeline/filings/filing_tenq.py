@@ -16,29 +16,26 @@ class FilingTenQ(BaseFiling):
         """Upserts the 10-Q filing and associated pages"""
         xbrl = await self._load_xbrl()
 
-        if xbrl is None:
-            logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
+        # if xbrl is None:
+        #     logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
         # Filing and pages
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        # Sections and section chunks
-        sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
-        section_chunks_task = self._upsert_filing_section_chunks(filing=filing, sections=sections)
-
-        # Financial statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
-        # Notes and note chunks
-        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        filing_note_chunks_task = self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes,
-                                                                  filing=filing)
+        # Use transaction to batch all embeddings from chunks/notes/attachments
+        async with self.database.transaction():
+            sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
+            await self._upsert_filing_section_chunks(filing=filing, sections=sections)
 
-        # Attachments
-        attachments_task = self._upsert_attachments_and_pages(filing_id=filing['id'])
+            # Notes and note chunks
+            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
-        _, _, attachment_data = await asyncio.gather(section_chunks_task, filing_note_chunks_task, attachments_task)
+            # Attachments
+            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata + mark filing as synced
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
@@ -119,7 +116,7 @@ class FilingTenQ(BaseFiling):
 
         return sections
 
-    async def _upsert_filing_section_chunks(self, filing: dict, sections: List[dict]):
+    async def _upsert_filing_section_chunks(self, filing: dict, sections: List[dict]) -> object:
         """Upserts the filing section chunks"""
         fiscal_year = filing.get('fiscal_year')
         fiscal_period = filing.get('fiscal_period')

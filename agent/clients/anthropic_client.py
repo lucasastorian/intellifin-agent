@@ -13,6 +13,7 @@ from database.utils.rate_limiters.token_limiter import TokenRateLimiter
 
 class AnthropicClient(BaseClient):
 
+    provider: str = "Anthropic"
     max_tokens: int = 16384
     betas: List[str] = ["interleaved-thinking-2025-05-14"]
 
@@ -24,16 +25,16 @@ class AnthropicClient(BaseClient):
         self.temperature = temperature
         self.verbose = verbose
         self.tier = tier
+        self.reasoning_effort = reasoning_effort
         self.reasoning_budget = {
             "low": 1024,
             "medium": 2048,
             "high": 4096,
             "none": 0
-        }[reasoning_effort]
+        }[self.reasoning_effort]
 
         self.client = anthropic.AsyncAnthropic()
 
-        # Setup rate limiter (pass model for model-specific limits)
         limits = get_rate_limits("anthropic", tier, model)
         self.rate_limiter = TokenRateLimiter(
             max_tokens=limits["tokens_per_minute"],
@@ -41,35 +42,6 @@ class AnthropicClient(BaseClient):
         )
 
         self.tool_call_arguments = ""
-
-    def _count_tokens(self, messages: List[Message], system_prompt: str, actions: List[BaseAction]) -> int:
-        """
-        Estimate input tokens for Anthropic API request.
-
-        Includes: system prompt + messages + tool schemas
-
-        Uses tiktoken for token counting by concatenating all content into one string.
-        """
-        parts = []
-
-        # Add system prompt
-        parts.append(f"SYSTEM: {system_prompt}")
-
-        # Add all messages in anthropic format
-        for message in messages:
-            formatted = message.anthropic_format()
-            parts.append(json.dumps(formatted))
-
-        # Add all tool schemas
-        for action in actions:
-            tool_schema = action.anthropic_schema
-            parts.append(json.dumps(tool_schema))
-
-        # Concatenate everything
-        full_content = "\n".join(parts)
-
-        # Count tokens using tiktoken
-        return self.num_tokens(full_content)
 
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
                      allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
@@ -173,3 +145,27 @@ class AnthropicClient(BaseClient):
         completion.status = 'completed'
 
         return completion
+
+    def _count_tokens(self, messages: List[Message], system_prompt: str, actions: List[BaseAction]) -> int:
+        """
+        Estimate input tokens for Anthropic API request.
+
+        Includes: system prompt + messages + tool schemas
+
+        Uses tiktoken for token counting by concatenating all content into one string.
+        """
+        parts = []
+
+        parts.append(f"SYSTEM: {system_prompt}")
+
+        for message in messages:
+            formatted = message.anthropic_format()
+            parts.append(json.dumps(formatted))
+
+        for action in actions:
+            tool_schema = action.anthropic_schema
+            parts.append(json.dumps(tool_schema))
+
+        full_content = "\n".join(parts)
+
+        return self.num_tokens(full_content)

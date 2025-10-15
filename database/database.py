@@ -650,9 +650,23 @@ class Database:
             raise DatabaseError(str(e)) from e
 
     async def _exec(self, sql: str, params: Union[List, tuple] = ()) -> List[Dict[str, Any]]:
-        """Execute SQL with error handling and return rows as dicts."""
+        """Execute SQL with error handling and return rows as dicts.
+
+        Includes optional slow-query logging controlled by INTELLIFIN_SLOW_SQL_MS (default 2000ms).
+        """
+        import time
+        t0 = time.time()
         with self._lock:
-            return self._exec_unsafe(sql, params)
+            rows = self._exec_unsafe(sql, params)
+        elapsed_ms = (time.time() - t0) * 1000.0
+        try:
+            threshold = int(os.environ.get("INTELLIFIN_SLOW_SQL_MS", "2000"))
+        except Exception:
+            threshold = 2000
+        if elapsed_ms >= threshold:
+            import logging
+            logging.warning(f"Slow SQL ({elapsed_ms:.0f} ms): {sql[:200]} ... params={params[:5] if isinstance(params, (list, tuple)) else ''}")
+        return rows
 
     @classmethod
     def from_file(cls, path: str, schema: Schema):

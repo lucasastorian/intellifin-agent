@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 import tiktoken
 from typing import List, Set, Optional
 from pydantic import BaseModel
@@ -46,7 +47,6 @@ class BaseAction(ABC):
             company = Company(symbol=symbol, database=self.database, edgar_user_agent=self.edgar_user_agent,
                               start_year=self.start_year, verbose=self.verbose)
 
-            # Build sync description
             sync_desc = symbol
             if forms or start_date or end_date:
                 parts = []
@@ -57,19 +57,42 @@ class BaseAction(ABC):
                     parts.append(f"({date_range})")
                 sync_desc += f" [{' '.join(parts)}]"
 
-            synced_count = await company.upsert(forms=forms, start_date=start_date, end_date=end_date,
-                                                include_earnings_transcripts=include_earnings_transcripts)
-
-            # Only show sync message if filings were actually synced
-            if synced_count > 0:
+            try:
                 if self.verbose:
-                    print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')}",
-                          flush=True)
-            elif synced_count == 0 and not company.company.not_found:
-                # Company found but nothing to sync (all already synced)
-                pass  # No message
+                    print(f"  → Sync start: {sync_desc}", flush=True)
+                synced_count = await asyncio.wait_for(
+                    company.upsert(
+                        forms=forms,
+                        start_date=start_date,
+                        end_date=end_date,
+                        include_earnings_transcripts=include_earnings_transcripts
+                    ),
+                    timeout=int(os.environ.get("INTELLIFIN_SYNC_TIMEOUT", "600"))
+                )
+            except asyncio.TimeoutError:
+                if self.verbose:
+                    print(f"  {self._c('✗', 'red')} Sync timeout for {symbol}", flush=True)
+                not_found.append(symbol)
+                continue
+
+            except Exception as e:
+                if self.verbose:
+                    print(f"  {self._c('✗', 'red')} Sync error for {symbol}: {e}", flush=True)
+                not_found.append(symbol)
+                continue
+
+            # Verify company exists in DB (synced_count=0 just means no NEW filings, not "not found")
+            company_row = await self.database.table("companies").select("id").contains("symbols", symbol).limit(1).execute()
+
+            if company_row.data:
+                if self.verbose:
+                    if synced_count > 0:
+                        print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} {synced_count} new",
+                              flush=True)
+                    else:
+                        print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} up to date",
+                              flush=True)
             else:
-                # Company not found
                 if self.verbose:
                     print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
                           flush=True)

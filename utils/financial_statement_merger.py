@@ -515,8 +515,9 @@ class FinancialStatementMerger:
             # Coalesce metadata: use original values, fill missing with new values
             for col in ['concept', 'label', 'level', 'dimension', 'axis', 'member']:
                 if f'{col}_new' in merged.columns:
-                    # Use fillna with explicit infer_objects to avoid downcasting warning
-                    merged[col] = merged[col].fillna(merged[f'{col}_new']).infer_objects(copy=False)
+                    # Use where to coalesce without triggering concat-with-empty deprecation
+                    # Keep explicit infer_objects for stable dtype behavior
+                    merged[col] = merged[col].where(merged[col].notna(), merged[f'{col}_new']).infer_objects(copy=False)
                     merged.drop(columns=[f'{col}_new'], inplace=True)
 
         merged['_order'] = merged['_merge_key'].map({k: i for i, k in enumerate(merge_key_order)})

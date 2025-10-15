@@ -1,3 +1,4 @@
+import datetime
 from typing import List, Optional
 
 from schema import schema
@@ -9,6 +10,7 @@ from agent.actions.base_action import BaseAction
 from agent.message import Message, Action
 from agent.clients.base_client import BaseClient
 from agent.utils.usage import Usage
+from agent.action_response import ContextRefinement
 from agent.actions import (ListCompaniesAction, ListFilingsAction, ListAttachmentsAction,
                            ReadFilingAction,  ReadAttachmentAction, ViewFinancialStatementsAction,
                            PythonExecAction, PlanAction,
@@ -20,21 +22,20 @@ class Agent:
     start_year: int = 2018
     enable_web_search: bool = False
 
-    def __init__(self, edgar_user_agent: str, client: BaseClient, max_iter: int = 20, verbose: bool = True):
+    def __init__(self, edgar_user_agent: str, client: BaseClient, database: Database, max_iter: int = 20, verbose: bool = True):
         self.edgar_user_agent = edgar_user_agent
         self.client = client
+        self.database = database
         self.num_iter = 0
         self.max_iter = max_iter
         self.verbose = verbose
         self.messages: List[Message] = []
-        self._initialized = False
 
-        self.database = Database(schema=schema, base_path="./data/intellifin.db")
+        self.start = datetime.datetime.now()
+        self.end = None
 
     async def run(self, query: str) -> Optional[str]:
         """Orchestrates agent iterations (horizontal limit via max_iter)"""
-        await self._initialize()
-
         self.messages.append(Message(role="user", status="completed", content=query))
 
         base_actions = [
@@ -72,6 +73,7 @@ class Agent:
             )
 
             if optional_actions is None:
+                self.end = datetime.datetime.now()
                 return self.messages[-1].content
 
             dynamic_actions = optional_actions
@@ -149,13 +151,10 @@ class Agent:
 
         return follow_ups
 
-    def _apply_context_refinement(self, refinement):
+    def _apply_context_refinement(self, refinement: ContextRefinement):
         """Refine a previous message's content by ID"""
-        from agent.action_response import ContextRefinement
-
         for i, msg in enumerate(self.messages):
             if msg.id == refinement.message_id:
-                # Refine content while preserving other fields
                 self.messages[i].content = refinement.refined_content
                 return
 
@@ -195,11 +194,7 @@ class Agent:
 
         return usage
 
-    async def _initialize(self):
-        """Async initialization - provisions companies database if needed"""
-        if self._initialized:
-            return
-
-        provisioner = CompanyProvisioner(database=self.database, edgar_user_agent=self.edgar_user_agent)
-        await provisioner.provision()
-        self._initialized = True
+    @property
+    def duration(self) -> float:
+        """Returns the duration in seconds"""
+        return (self.end - self.start).total_seconds()

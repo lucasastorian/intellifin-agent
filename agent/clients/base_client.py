@@ -9,6 +9,7 @@ from agent.message import Message
 class BaseClient(ABC):
     """Abstract base class for LLM clients (OpenAI, Anthropic, etc.)"""
 
+    provider: str = None
     model: str = None
     reasoning_effort: str = None
 
