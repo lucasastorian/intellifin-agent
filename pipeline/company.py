@@ -5,7 +5,7 @@ from datetime import date
 from typing import List, Optional, Dict
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
-from edgar.async_api import get_company_async
+from edgar.async_api import get_company_async, load_full_filings_async
 
 from database.database import Database
 from pipeline.filings.base_filing import BaseFiling
@@ -83,7 +83,7 @@ class Company:
                 return False
 
             parser = self._get_filing_parser(filing=filing, company=company)
-            await asyncio.wait_for(parser.upsert(), timeout=300)
+            await parser.upsert()
 
             return True
 
@@ -123,6 +123,8 @@ class Company:
 
         else:
             years = list(range(self.start_year, self.end_year))
+
+        await load_full_filings_async(edgar_company)
 
         return edgar_company.get_filings(form=forms_to_load, year=years)
 

@@ -20,11 +20,12 @@ class BaseAction(ABC):
     name: str
     schema: BaseModel
 
-    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2017, verbose: bool = True):
+    def __init__(self, database: Database, edgar_user_agent: str, start_year: int = 2017, verbose: bool = True, skip_sync: bool = False):
         self.database = database
         self.edgar_user_agent = edgar_user_agent
         self.start_year = start_year
         self.verbose = verbose
+        self.skip_sync = skip_sync
 
     @abstractmethod
     async def call(self, action: Action) -> ActionResponse:
@@ -43,6 +44,10 @@ class BaseAction(ABC):
             end_date: Filter filings by report_date <= this date (ISO format 'YYYY-MM-DD')
             include_earnings_transcripts: Whether to sync earnings transcripts
         """
+        # Skip sync if database is pre-synced (e.g., for eval benchmarking)
+        if self.skip_sync:
+            return []
+
         not_found = []
 
         for symbol in symbols:
@@ -60,14 +65,12 @@ class BaseAction(ABC):
                 sync_desc += f" [{' '.join(parts)}]"
 
             try:
-                synced_count = await asyncio.wait_for(
-                    company.upsert(
-                        forms=forms,
-                        start_date=start_date,
-                        end_date=end_date,
-                        include_earnings_transcripts=include_earnings_transcripts
-                    ),
-                    timeout=600
+                # Avoid outer cancellations that can interrupt embedding flush; let inner timeouts handle specifics
+                synced_count = await company.upsert(
+                    forms=forms,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_earnings_transcripts=include_earnings_transcripts
                 )
             except asyncio.TimeoutError:
                 if self.verbose:

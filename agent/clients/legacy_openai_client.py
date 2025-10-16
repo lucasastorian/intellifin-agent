@@ -56,6 +56,7 @@ class ChatCompletionsOpenAIClient(BaseClient):
 
         async for chunk in response:
             if chunk.choices:
+                print(chunk.choices[0])
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     completion.content += content

@@ -1,4 +1,5 @@
 import re
+import asyncio
 import json
 import sqlite3
 import threading
@@ -323,7 +324,7 @@ class Database:
                 if atomic_vectors_var.get():
                     # Atomic mode: embed first, THEN commit
                     # If embedding fails, we can rollback uncommitted SQL
-                    failed_groups = await self._flush_embedding_queue(emb_queue_var.get() or {})
+                    failed_groups = await asyncio.shield(self._flush_embedding_queue(emb_queue_var.get() or {}))
                     with self._lock:
                         self.conn.commit()
 
@@ -339,7 +340,7 @@ class Database:
                     with self._lock:
                         self.conn.commit()
 
-                    failed_groups = await self._flush_embedding_queue(emb_queue_var.get() or {})
+                    failed_groups = await asyncio.shield(self._flush_embedding_queue(emb_queue_var.get() or {}))
                     if failed_groups:
                         # SQL already committed - write failures to outbox for retry
                         import logging
@@ -373,16 +374,11 @@ class Database:
                 emb_queue_var.reset(token_queue)
 
     async def _flush_embedding_queue(self, queue: Dict[Tuple[str, str], Dict[str, List]]):
-        """Batch embed and store all accumulated embeddings from transaction.
+        """Embed and store all queued texts in a single global pass, then route to stores.
 
-        Processes each (table, column) group independently. Returns list of failed groups
-        so only failures are written to outbox (avoids re-enqueueing successful writes).
-
-        Args:
-            queue: Dict mapping (table, column) -> {ids: [...], texts: [...]}
-
-        Returns:
-            List of failed groups as tuples: (table, column, ids, texts)
+        Flattens texts across groups for one logical embed call (the client may sub-batch
+        internally), then demuxes results back to each (table, column) vector store. Returns
+        a list of failed groups for outbox retry.
         """
         if not queue:
             return []
@@ -394,31 +390,69 @@ class Database:
             )
 
         import logging
-        failed_groups = []
+        from typing import Tuple as _Tuple
+
+        # Build flat inputs and routing metadata
+        flat_texts: List[str] = []
+        idx_map: List[_Tuple[str, str, int]] = []  # (table, column, row_id) per text
+        group_indices: Dict[_Tuple[str, str], List[int]] = {}
 
         for (table, column), payload in queue.items():
-            ids = payload["ids"]
-            texts = payload["texts"]
+            ids = payload.get("ids", [])
+            texts = payload.get("texts", [])
             if not texts:
                 continue
+            start = len(flat_texts)
+            flat_texts.extend(texts)
+            idx_map.extend((table, column, rid) for rid in ids)
+            group_indices.setdefault((table, column), []).extend(range(start, start + len(texts)))
 
+        if not flat_texts:
+            return []
+
+        logging.debug(
+            f"Embedding global batch: {len(flat_texts)} texts across {len(group_indices)} groups"
+        )
+
+        # Single logical embed call; protect from outer cancellations
+        try:
+            import asyncio as _asyncio
+            embeddings = await _asyncio.shield(self.embedder.embed(flat_texts))
+        except Exception as e:
+            logging.error(f"Global embed failed: {e}")
+            failed = []
+            for (table, column), payload in queue.items():
+                if payload.get("texts"):
+                    failed.append((table, column, payload["ids"], payload["texts"]))
+            return failed
+
+        if len(embeddings) != len(flat_texts):
+            logging.error(
+                f"Embedding count mismatch: got {len(embeddings)} for {len(flat_texts)} inputs"
+            )
+            failed = []
+            for (table, column), payload in queue.items():
+                if payload.get("texts"):
+                    failed.append((table, column, payload["ids"], payload["texts"]))
+            return failed
+
+        # Demux results back to groups
+        grouped_vectors: Dict[_Tuple[str, str], _Tuple[List[int], List[np.ndarray]]] = {}
+        for i, (table, column, row_id) in enumerate(idx_map):
+            ids_list, vecs_list = grouped_vectors.setdefault((table, column), ([], []))
+            ids_list.append(row_id)
+            vecs_list.append(np.array(embeddings[i], dtype=np.float32))
+
+        failed_groups = []
+        for (table, column), (ids, vectors) in grouped_vectors.items():
             try:
-                # Call embedder - VoyageClient handles batching internally
-                # May split by token limits, resulting in multiple API calls per group
-                logging.debug(f"Embedding {len(texts)} texts for {table}.{column}")
-                embeddings = await self.embedder.embed(texts)
-                vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
-
-                # Store in vector store (locked for thread safety)
-                vector_store = self.get_or_create_vector_store(table, column)
+                vs = self.get_or_create_vector_store(table, column)
                 with self._lock:
-                    vector_store.add_batch(ids, vectors)
-
-                logging.debug(f"Successfully embedded {len(texts)} texts for {table}.{column}")
-
+                    vs.add_batch(ids, vectors)
             except Exception as e:
-                # Collect failure for outbox write - don't propagate to avoid rolling back other groups
-                logging.error(f"Failed to embed/store group ({table}, {column}): {e}")
+                logging.error(f"Vector store write failed for {table}.{column}: {e}")
+                indices = group_indices.get((table, column), [])
+                texts = [flat_texts[i] for i in indices]
                 failed_groups.append((table, column, ids, texts))
 
         return failed_groups
@@ -501,7 +535,8 @@ class Database:
         for (table, column), payload in grouped.items():
             try:
                 logging.debug(f"Retrying {len(payload['texts'])} embeddings for ({table}, {column})")
-                embeddings = await self.embedder.embed(payload["texts"])
+                import asyncio as _asyncio
+                embeddings = await _asyncio.shield(self.embedder.embed(payload["texts"]))
                 vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
                 vector_store = self.get_or_create_vector_store(table, column)

@@ -1,9 +1,15 @@
-from agent.agent import Agent
-from agent.clients.base_client import BaseClient
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 from agent.utils.pricing import calculate_cost
 
+# Avoid circular import at runtime; only import for type checking
+if TYPE_CHECKING:  # pragma: no cover
+    from agent.agent import Agent
+    from agent.clients.base_client import BaseClient
 
-def print_run_summary(agent: Agent):
+
+def print_run_summary(agent: "Agent"):
     """Print a concise run summary: model, iterations, tokens, estimated cost.
 
     Args:

@@ -325,7 +325,8 @@ class UpsertBuilder:
                 self.db._enqueue_embedding(self.table, field_name, ids, texts)
             else:
                 # Backwards compatible: embed immediately
-                embeddings = await self.db.embedder.embed(texts)
+                import asyncio as _asyncio
+                embeddings = await _asyncio.shield(self.db.embedder.embed(texts))
                 vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
                 vector_store = self.db.get_or_create_vector_store(self.table, field_name)

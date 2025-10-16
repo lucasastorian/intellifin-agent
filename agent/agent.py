@@ -22,13 +22,14 @@ class Agent:
     start_year: int = 2018
     enable_web_search: bool = False
 
-    def __init__(self, edgar_user_agent: str, client: BaseClient, database: Database, max_iter: int = 20, verbose: bool = True):
+    def __init__(self, edgar_user_agent: str, client: BaseClient, database: Database, max_iter: int = 20, verbose: bool = True, skip_sync: bool = False):
         self.edgar_user_agent = edgar_user_agent
         self.client = client
         self.database = database
         self.num_iter = 0
         self.max_iter = max_iter
         self.verbose = verbose
+        self.skip_sync = skip_sync
         self.messages: List[Message] = []
 
         self.start = datetime.datetime.now()
@@ -40,26 +41,26 @@ class Agent:
 
         base_actions = [
             # Create a plan
-            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            PlanAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
             # Company search and filing listings
-            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
-            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ListCompaniesAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
+            ListFilingsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
             # Read / search individual filings & their attachments
-            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
-            SearchFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
-            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
-            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ReadFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
+            SearchFilingAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
+            ListAttachmentsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
+            ReadAttachmentAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
             # View the financial statements of a company - across filings (including Q3 inference for quarterly financials)
-            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            ViewFinancialStatementsAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
             # Execute Python code to calculate returns / CAGR / etc.
-            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            PythonExecAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
             # Search across all filings / earnings transcripts for a company semantically.
-            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose),
+            SemanticSearchAction(database=self.database, edgar_user_agent=self.edgar_user_agent, verbose=self.verbose, skip_sync=self.skip_sync),
 
         ]
 
