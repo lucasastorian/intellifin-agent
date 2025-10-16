@@ -190,7 +190,7 @@ class BaseFiling(ABC):
 
     async def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing: dict):
         """Chunks filing notes and upserts each note separately for contextualized embeddings"""
-        generator = NoteEmbeddingGenerator(company=self.company, filing=filing, chunk_size=2048, chunk_overlap=0)
+        generator = NoteEmbeddingGenerator(company=self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
         # Upsert each note's chunks separately to preserve document boundaries
         # for contextualized embeddings (voyage-context-3 compatibility)

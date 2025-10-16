@@ -90,9 +90,9 @@ class VoyageClient:
 
         return results
 
-    def count_tokens(self, texts: List[str]) -> int:
+    def count_tokens(self, texts: List[str], model: str = "voyage-3.5-lite") -> int:
         """Returns the number of tokens"""
-        return self.client.count_tokens(texts, model=self.model)
+        return self.client.count_tokens(texts=texts, model=model)
 
     # @retry(
     #     stop=stop_after_attempt(3),
@@ -387,16 +387,63 @@ class VoyageClient:
             self.cache.set(cache_key, doc_embeddings)
             results[idx] = doc_embeddings
 
-    async def _contextualized_embed(self, inputs: List[List[str]], model: str,
-                                    input_type: str = "document", output_dimension: int = 512) -> List[List[List[float]]]:
-        """Make Voyage API call for contextualized embeddings.
-        """
-        logging.debug(f"Contextualized API call: {len(inputs)} documents, "
-                      f"{sum(len(doc) for doc in inputs)} total chunks")
+    # async def _contextualized_embed(self, inputs: List[List[str]], model: str,
+    #                                 input_type: str = "document", output_dimension: int = 512,
+    #                                 max_concurrent: int = 10) -> List[List[List[float]]]:
+    #     """Make Voyage API calls for contextualized embeddings in parallel."""
+    #
+    #     batches = self._batch_contextualized_embed(inputs)
+    #     semaphore = asyncio.Semaphore(max_concurrent)
+    #     results = []
+    #
+    #     async def embed_batch(batch: List[List[str]]) -> List[List[float]]:
+    #         async with semaphore:
+    #             async with self.request_rate_limiter.context():
+    #                 response = await self.client.contextualized_embed(
+    #                     inputs=batch,
+    #                     model=model,
+    #                     input_type=input_type,
+    #                     output_dimension=output_dimension,
+    #                 )
+    #             return [[embedding for embedding in doc_result.embeddings] for doc_result in response.results]
+    #
+    #     try:
+    #         tasks = [asyncio.create_task(embed_batch(batch)) for batch in batches]
+    #
+    #         for future in asyncio.as_completed(tasks):
+    #             try:
+    #                 batch_output = await future
+    #                 results.extend(batch_output)
+    #
+    #             except voyageai.error.RateLimitError as e:
+    #                 logging.warning(f"Voyage API rate limit hit: {e}")
+    #                 raise
+    #
+    #             except Exception as e:
+    #                 if "rate limit" in str(e).lower():
+    #                     logging.warning(f"Local rate limit hit during contextualized embed: {e}")
+    #                 raise
+    #
+    #         return results
+    #
+    #     except Exception:
+    #         logging.exception("Contextualized embedding failed")
+    #         raise
+
+    async def _contextualized_embed(
+            self,
+            inputs: List[List[str]],
+            model: str,
+            input_type: str = "document",
+            output_dimension: int = 512,
+    ) -> List[List[List[float]]]:
+        """Make Voyage API calls for contextualized embeddings serially."""
+
+        batches = self._batch_contextualized_embed(inputs)
+        results = []
 
         try:
-            outputs = []
-            for batch in self._batch_contextualized_embed(inputs=inputs):
+            for i, batch in enumerate(batches):
                 async with self.request_rate_limiter.context():
                     response = await self.client.contextualized_embed(
                         inputs=batch,
@@ -405,18 +452,20 @@ class VoyageClient:
                         output_dimension=output_dimension,
                     )
 
-                output = [[embedding for embedding in doc_result.embeddings] for doc_result in response.results]
-                outputs.extend(output)
+                batch_output = [[embedding for embedding in doc_result.embeddings]
+                                for doc_result in response.results]
+                results.extend(batch_output)
 
-            return outputs
+            return results
 
         except voyageai.error.RateLimitError as e:
-            logging.warning(f"Voyage contextualized embed API rate limit hit: {e}")
+            logging.warning(f"Voyage API rate limit hit: {e}")
             raise
 
         except Exception as e:
             if "rate limit" in str(e).lower():
                 logging.warning(f"Local rate limit hit during contextualized embed: {e}")
+            logging.exception("Contextualized embedding failed")
             raise
 
     def _batch_contextualized_embed(self, inputs: List[List[str]]) -> List[List[List[str]]]:
@@ -426,14 +475,15 @@ class VoyageClient:
 
         num_tokens: int = 0
         for document in inputs:
-            num_tokens += self.count_tokens(texts=document)
+            doc_tokens = self.count_tokens(texts=document, model="voyage-context-3")
 
-            if num_tokens > 96_000:
+            if num_tokens + doc_tokens > 64_000 and batch:
                 batches.append(batch)
                 num_tokens = 0
                 batch = []
 
             batch.append(document)
+            num_tokens += doc_tokens
 
         if batch:
             batches.append(batch)

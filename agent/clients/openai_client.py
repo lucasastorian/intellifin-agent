@@ -7,6 +7,7 @@ from typing import Literal, List
 from agent.actions import BaseAction
 from agent.message import Message, Action, Thought, WebSearch
 from agent.clients.base_client import BaseClient
+from utils.retry import retry
 
 
 class OpenAIClient(BaseClient):
@@ -28,8 +29,6 @@ class OpenAIClient(BaseClient):
             api_key=os.environ['OPENAI_API_KEY'],
             timeout=300.0,
         )
-
-        self.tool_call_arguments = ""
 
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
                      allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
@@ -61,13 +60,24 @@ class OpenAIClient(BaseClient):
                 ]
             }
 
-        stream = await self.client.responses.create(**params)
+        return await self._stream_with_retry(params)
 
+    @retry(
+        attempts=3,
+        base_delay=1.0,
+        backoff=2.0,
+        jitter=(0.1, 0.5),
+        retry_on=(openai.APIError, openai.APIConnectionError, openai.RateLimitError),
+    )
+    async def _stream_with_retry(self, params: dict):
+        """Create and consume a streaming response with minimal retries."""
+        stream = await self.client.responses.create(**params)
         return await self.stream_completion(response=stream)
 
     async def stream_completion(self, response: AsyncStream):
         """Streams a chat completion to the console"""
         completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[], web_searches=[])
+        tool_call_arguments = ""
 
         async for event in response:
 
@@ -85,7 +95,7 @@ class OpenAIClient(BaseClient):
                         print(f"Thinking: \n\n", sep="", end="")
 
                 elif event.item.type == 'function_call':
-                    self.tool_call_arguments = ""
+                    tool_call_arguments = ""
                     action = Action(id=event.item.call_id, name=event.item.name, status="streaming", body={},
                                     external_id=event.item.id, index=event.output_index)
                     completion.actions.append(action)
@@ -122,9 +132,9 @@ class OpenAIClient(BaseClient):
                 completion.thoughts[-1].summaries[-1] = event.part.text
 
             elif event.type == 'response.function_call_arguments.delta':
-                self.tool_call_arguments += event.delta
+                tool_call_arguments += event.delta
                 try:
-                    body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
+                    body_json = from_json((tool_call_arguments.strip() or "{}").encode(),
                                           partial_mode="trailing-strings")
 
                     if type(body_json) is not dict:

@@ -283,25 +283,36 @@ class SelectBuilder(PredMixin, SelectMixin):
                 raise ValueError("No embedder available. Pass embedder argument or set db.embedder")
 
         vector_table = self.table
-        field = None
+        vector_column = column
+        underlying_field = None
 
         if self.table in self.schema.views:
+            # Resolve the view alias to the underlying table+column and field descriptor
             view_cls = self.schema.views[self.table]
             type_map = view_cls.type_map(self.schema)
             if column not in type_map:
                 raise ValueError(f"Column '{column}' not found in view '{self.table}'")
-            field = view_cls.get_fields()[column]
-            vector_table = field._view_src_table
+
+            # Field as declared on the view (carries source mapping)
+            view_field = view_cls.get_fields()[column]
+            # Underlying field descriptor from the source table (carries flags like contextualized/vector)
+            underlying_field = type_map[column]
+
+            # Use the source table/column for vector store
+            vector_table = getattr(view_field, '_view_src_table')
+            vector_column = getattr(view_field, '_view_src_field')
         else:
             table_cls = self.schema.get_table(self.table)
             fields = table_cls.get_fields()
             if column not in fields:
                 raise ValueError(f"Column '{column}' not found in table '{self.table}'")
-            field = fields[column]
+            underlying_field = fields[column]
 
-        vector_store = self.db.get_or_create_vector_store(vector_table, column)
+        # Create/load the vector store using the actual source table+column
+        vector_store = self.db.get_or_create_vector_store(vector_table, vector_column)
 
-        is_contextualized = getattr(field, 'contextualized', False)
+        # Determine contextualization from the underlying field descriptor
+        is_contextualized = getattr(underlying_field, 'contextualized', False)
         if is_contextualized:
             print(f"Running contextualized vector search")
             query_embedding = await embedder.contextual_query_vector(query=query)

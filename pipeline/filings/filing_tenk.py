@@ -34,8 +34,8 @@ class FilingTenK(BaseFiling):
         if self.filing.reports:
             note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
             await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
-        else:
-            logger.warning(f"{self.accession_number} has no reports?")
+        # else:
+        #     logger.warning(f"{self.accession_number} has no reports?")
 
         # Attachments and attachment chunks
         attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
