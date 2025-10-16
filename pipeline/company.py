@@ -27,7 +27,7 @@ class Company:
                         "DEF 14A",
                         "20-F", "6-K"]
 
-    def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2015,
+    def __init__(self, symbol: str, database: Database, edgar_user_agent: str, start_year: int = 2018,
                  end_year: int = 2027, verbose: bool = True):
         self.symbol = symbol.upper()
         self.database = database

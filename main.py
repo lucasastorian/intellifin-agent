@@ -32,7 +32,7 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
                 tickers=tickers.split(','),
                 database=database,
                 edgar_user_agent=user_agent,
-                start_year=2018
+                start_year=2019
             ))
 
     agent = Agent(

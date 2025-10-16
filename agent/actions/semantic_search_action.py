@@ -161,8 +161,8 @@ class SemanticSearchAction(BaseAction):
 
         forms = self._get_forms_for_document_types(args.document_types)
         include_transcripts = (
-            "earnings_transcript" in args.document_types or
-            "earnings_transcripts" in args.document_types
+                "earnings_transcript" in args.document_types or
+                "earnings_transcripts" in args.document_types
         )
 
         not_found = await self.sync_symbols(
@@ -209,6 +209,25 @@ class SemanticSearchAction(BaseAction):
                 continue
             all_results.extend(results)
 
+        # if self.verbose and all_results:
+        #     try:
+        #         print("  → Score debug (all candidates):", flush=True)
+        #         for r in all_results:
+        #             r_type = r.get('_type', '?')
+        #             rid = r.get('id', '?')
+        #             parts = []
+        #             for k in ['_score', '_original_score', '_vector_score', '_keyword_score', '_fused_score',
+        #                       'relevance_score']:
+        #                 if k in r and isinstance(r[k], (int, float)):
+        #                     parts.append(f"{k}={r[k]:.4f}")
+        #                 elif k in r:
+        #                     parts.append(f"{k}={r[k]}")
+        #             print(f"    [{r_type} id={rid}] " + (", ".join(parts) if parts else "(no score fields)"),
+        #                   flush=True)
+        #     except Exception:
+        #         # Never fail the action due to debug printing
+        #         pass
+
         if not all_results:
             self.log_done("No matches found", content="No matching results found.")
             return ActionResponse(
@@ -220,8 +239,40 @@ class SemanticSearchAction(BaseAction):
                 )
             )
 
-        all_results.sort(key=lambda x: x.get('_score', 0), reverse=True)
-        top_results = all_results[:args.limit]
+        if all_results:
+            try:
+                rr = await self.database.embedder.rerank(query=args.query,
+                                                         documents=[r['embedding'] for r in all_results],
+                                                         top_k=args.limit)
+                top_results = [{**all_results[x['index']],
+                                '_original_score': all_results[x['index']].get('_score', 0.0),
+                                'relevance_score': x['relevance_score'],
+                                '_score': x['relevance_score']} for x in rr]
+            except Exception as e:
+                self.log_error(f"Rerank failed, using vector scores: {e}")
+                all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+                top_results = all_results[:args.limit]
+        else:
+            all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+            top_results = all_results[:args.limit]
+
+        # if self.verbose and top_results:
+        #     try:
+        #         print("  → Score debug (top results):", flush=True)
+        #         for r in top_results:
+        #             r_type = r.get('_type', '?')
+        #             rid = r.get('id', '?')
+        #             parts = []
+        #             for k in ['_score', '_original_score', '_vector_score', '_keyword_score', '_fused_score',
+        #                       'relevance_score']:
+        #                 if k in r and isinstance(r[k], (int, float)):
+        #                     parts.append(f"{k}={r[k]:.4f}")
+        #                 elif k in r:
+        #                     parts.append(f"{k}={r[k]}")
+        #             print(f"    [{r_type} id={rid}] " + (", ".join(parts) if parts else "(no score fields)"),
+        #                   flush=True)
+        #     except Exception:
+        #         pass
 
         content = self._format_results(top_results)
 
@@ -237,14 +288,16 @@ class SemanticSearchAction(BaseAction):
             )
         )
 
+    # (Removed helper: minimal rerank now uses 'embedding' directly)
+
     async def _search_note_chunks(self, args: SemanticSearch, forms: List[str]) -> List[dict]:
         """Vector search filing note chunks"""
         try:
-            query = (
+            result = await (
                 self.database
                 .table("company_filing_note_chunks")
                 .select(
-                    "id,filing_note_id,note_title,content,has_table,"
+                    "id,filing_note_id,note_title,content,embedding,has_table,"
                     "filing_id,form,filing_date,fiscal_year,fiscal_period,"
                     "company_name,company_symbols"
                 )
@@ -252,14 +305,14 @@ class SemanticSearchAction(BaseAction):
                 .in_("form", forms)
                 .gte("filing_date", args.start_date)
                 .lte("filing_date", args.end_date)
+                .vector_search(
+                    args.query,
+                    "embedding",
+                    topk=args.limit * 2,
+                    return_scores=True
+                )
+                .execute()
             )
-
-            result = await query.vector_search(
-                args.query,
-                "embedding",
-                topk=args.limit * 2,
-                return_scores=True
-            ).execute()
 
             for r in result.data:
                 r['_type'] = 'filing_note_chunk'
@@ -273,11 +326,11 @@ class SemanticSearchAction(BaseAction):
     async def _search_section_chunks(self, args: SemanticSearch, forms: List[str]) -> List[dict]:
         """Vector search filing section chunks"""
         try:
-            query = (
+            result = await (
                 self.database
                 .table("company_filing_section_chunks")
                 .select(
-                    "id,section,page,pages,has_table,"
+                    "id,section,page,pages,embedding,has_table,"
                     "filing_id,form,filing_date,report_date,fiscal_year,fiscal_period,"
                     "company_name,company_symbols"
                 )
@@ -285,14 +338,14 @@ class SemanticSearchAction(BaseAction):
                 .in_("form", forms)
                 .gte("report_date", args.start_date)
                 .lte("report_date", args.end_date)
+                .vector_search(
+                    args.query,
+                    "embedding",
+                    topk=args.limit * 2,
+                    return_scores=True
+                )
+                .execute()
             )
-
-            result = await query.vector_search(
-                args.query,
-                "embedding",
-                topk=args.limit * 2,
-                return_scores=True
-            ).execute()
 
             for r in result.data:
                 r['_type'] = 'filing_section_chunk'
@@ -310,7 +363,7 @@ class SemanticSearchAction(BaseAction):
                 self.database
                 .table("company_filing_attachment_chunks")
                 .select(
-                    "id,index,page,pages,has_table,exhibit_number,attachment_description,attachment_type,"
+                    "id,index,page,pages,embedding,has_table,exhibit_number,attachment_description,attachment_type,"
                     "filing_id,form,filing_date,report_date,fiscal_year,fiscal_period,"
                     "company_name,company_symbols"
                 )
@@ -325,12 +378,14 @@ class SemanticSearchAction(BaseAction):
                 attachment_types = self._get_attachment_types_for_focus(args.current_report_focus)
                 query = query.in_("attachment_type", attachment_types)
 
-            result = await query.vector_search(
+            query = query.vector_search(
                 args.query,
                 "embedding",
                 topk=args.limit * 2,
                 return_scores=True
-            ).execute()
+            )
+
+            result = await query.execute()
 
             for r in result.data:
                 r['_type'] = 'filing_attachment_chunk'
@@ -344,22 +399,22 @@ class SemanticSearchAction(BaseAction):
     async def _search_transcript_chunks(self, args: SemanticSearch) -> List[dict]:
         """Vector search earnings transcript chunks"""
         try:
-            query = (
+            result = await (
                 self.database
                 .table("company_earnings_transcript_chunks")
                 .select(
-                    "id,index,sections,transcript_id,fiscal_year,fiscal_period,"
+                    "id,index,sections,embedding,transcript_id,fiscal_year,fiscal_period,"
                     "company_name,company_symbols"
                 )
                 .contains("company_symbols", args.symbol)
+                .vector_search(
+                    args.query,
+                    "embedding",
+                    topk=args.limit * 2,
+                    return_scores=True
+                )
+                .execute()
             )
-
-            result = await query.vector_search(
-                args.query,
-                "embedding",
-                topk=args.limit * 2,
-                return_scores=True
-            ).execute()
 
             for r in result.data:
                 r['_type'] = 'earnings_transcript_chunk'

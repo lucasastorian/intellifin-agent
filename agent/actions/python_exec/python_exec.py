@@ -3,6 +3,7 @@ import ast
 import asyncio
 import io
 import math
+import collections
 import sys
 import traceback
 from pydantic import BaseModel, Field, ValidationError
@@ -72,11 +73,15 @@ class PythonExecAction(BaseAction):
         'print': print,
         # Math module
         'math': math,
+        # Limited safe standard library modules
+        'collections': collections,
     }
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.namespace = {'__builtins__': self.SAFE_BUILTINS}
+        # Provide a safe __import__ that only allows modules present in SAFE_BUILTINS
+        self.namespace['__builtins__']['__import__'] = self._make_safe_import(self.namespace['__builtins__'])
         self._lock = asyncio.Lock()
 
     async def call(self, action: Action):
@@ -93,6 +98,8 @@ class PythonExecAction(BaseAction):
         if args.reset:
             async with self._lock:
                 self.namespace = {'__builtins__': self.SAFE_BUILTINS}
+                # Reinstall safe __import__ after reset
+                self.namespace['__builtins__']['__import__'] = self._make_safe_import(self.namespace['__builtins__'])
 
         var_count = len([k for k in self.namespace.keys() if k != '__builtins__'])
 
@@ -218,7 +225,7 @@ class PythonExecAction(BaseAction):
                     content_parts.append(f"\n- Modified: `{result['modified']}`")
             else:
                 content_parts.append(f"\n**Result**: `{result}`")
-        elif not stdout_output.strip():
+        else:
             content_parts.append("\n**Executed** (no return value - end with expression or define `result`)")
 
         content = "".join(content_parts)
@@ -227,6 +234,18 @@ class PythonExecAction(BaseAction):
             content += f"\n\n_Session has {new_var_count} variable(s)_"
 
         return content
+
+    @staticmethod
+    def _make_safe_import(allowed_builtins):
+        """Return a restricted __import__ that only allows whitelisted modules."""
+        def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+            base = (name or "").split(".")[0]
+            if base in allowed_builtins:
+                # Return the top-level allowed module; attribute access resolves members
+                return allowed_builtins[base]
+            raise ImportError(f"Import of '{name}' is disabled for security")
+
+        return _safe_import
 
     @staticmethod
     def validate(action: Action) -> PythonExec:
