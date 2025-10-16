@@ -282,7 +282,6 @@ class SelectBuilder(PredMixin, SelectMixin):
             if embedder is None:
                 raise ValueError("No embedder available. Pass embedder argument or set db.embedder")
 
-        # Determine the field and source table for vector search
         vector_table = self.table
         field = None
 
@@ -294,7 +293,6 @@ class SelectBuilder(PredMixin, SelectMixin):
             field = view_cls.get_fields()[column]
             vector_table = field._view_src_table
         else:
-            # Regular table
             table_cls = self.schema.get_table(self.table)
             fields = table_cls.get_fields()
             if column not in fields:
@@ -303,11 +301,12 @@ class SelectBuilder(PredMixin, SelectMixin):
 
         vector_store = self.db.get_or_create_vector_store(vector_table, column)
 
-        # Check if field is contextualized to choose appropriate embedding method
         is_contextualized = getattr(field, 'contextualized', False)
         if is_contextualized:
+            print(f"Running contextualized vector search")
             query_embedding = await embedder.contextual_query_vector(query=query)
         else:
+            print(f"Running normal vector search")
             query_embedding = await embedder.query_vector(query=query)
 
         query_vec = np.array(query_embedding, dtype=np.float32)

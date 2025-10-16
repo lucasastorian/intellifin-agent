@@ -71,10 +71,8 @@ class HybridFusion:
         # Inject filter_ids into vector params
         vec_params = {**vec_params, 'filter_ids': filter_ids}
 
-        # Run both searches (vector returns nothing; keyword returns (ids, scores))
         async def run_vec():
             await builder._do_vector_search(topk=vec_topk, **vec_params)
-            # Vector scores stored in builder._vector_scores
             return list(builder._vector_scores.keys()), builder._vector_scores
 
         async def run_kw():

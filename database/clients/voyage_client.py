@@ -14,7 +14,9 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 class VoyageClient:
+
     max_batch_size: int = 1000
+    max_batch_tokens: int = 100_000
 
     def __init__(self, model: str = "voyage-3.5-lite", dimensions: int = 512, cache: bool = True,
                  rerank_model: str = "rerank-2.5"):
@@ -298,7 +300,6 @@ class VoyageClient:
         if len(inputs) > 1000:
             raise ValueError(f"voyage-context-3 supports max 1000 documents, got {len(inputs)}")
 
-        # Preprocess: split oversized documents
         processed_inputs, doc_to_original = self._preprocess_contextualized_inputs(inputs)
 
         for i, doc_chunks in enumerate(processed_inputs):
@@ -312,10 +313,8 @@ class VoyageClient:
             response = await self._contextualized_embed(processed_inputs, model, input_type, output_dimension)
             return self._merge_split_embeddings(response, doc_to_original, len(inputs))
 
-        # Check cache for each processed document (per-document caching)
         cached_results, uncached_inputs, uncached_indices = self._check_contextualized_cache(processed_inputs)
 
-        # Embed uncached documents in batch
         if uncached_inputs:
             logging.debug(f"Contextualized cache miss: {len(uncached_inputs)}/{len(processed_inputs)} documents")
 
@@ -323,12 +322,10 @@ class VoyageClient:
                 uncached_inputs, model, input_type, output_dimension
             )
 
-            # Store results and insert into cached_results
             self._store_contextualized_cache(uncached_inputs, uncached_indices, new_embeddings, cached_results)
         else:
             logging.debug(f"Contextualized cache hit: {len(processed_inputs)}/{len(processed_inputs)} documents")
 
-        # Merge split documents back together
         return self._merge_split_embeddings(cached_results, doc_to_original, len(inputs))
 
     @staticmethod
@@ -348,7 +345,6 @@ class VoyageClient:
         merged_results = [[] for _ in range(num_original_docs)]
 
         for processed_idx, original_idx in enumerate(doc_to_original):
-            # Concatenate embeddings from split parts
             merged_results[original_idx].extend(embeddings[processed_idx])
 
         return merged_results
@@ -392,24 +388,27 @@ class VoyageClient:
             results[idx] = doc_embeddings
 
     async def _contextualized_embed(self, inputs: List[List[str]], model: str,
-                                    input_type: str = "document", output_dimension: int = 512) -> List[
-        List[List[float]]]:
+                                    input_type: str = "document", output_dimension: int = 512) -> List[List[List[float]]]:
         """Make Voyage API call for contextualized embeddings.
         """
         logging.debug(f"Contextualized API call: {len(inputs)} documents, "
                       f"{sum(len(doc) for doc in inputs)} total chunks")
 
         try:
-            async with self.request_rate_limiter.context():
-                response = await self.client.contextualized_embed(
-                    inputs=inputs,
-                    model=model,
-                    input_type=input_type,
-                    output_dimension=output_dimension,
-                )
+            outputs = []
+            for batch in self._batch_contextualized_embed(inputs=inputs):
+                async with self.request_rate_limiter.context():
+                    response = await self.client.contextualized_embed(
+                        inputs=batch,
+                        model=model,
+                        input_type=input_type,
+                        output_dimension=output_dimension,
+                    )
 
-            # Return nested structure (one list per document)
-            return [[embedding for embedding in doc_result.embeddings] for doc_result in response.results]
+                output = [[embedding for embedding in doc_result.embeddings] for doc_result in response.results]
+                outputs.extend(output)
+
+            return outputs
 
         except voyageai.error.RateLimitError as e:
             logging.warning(f"Voyage contextualized embed API rate limit hit: {e}")
@@ -419,3 +418,24 @@ class VoyageClient:
             if "rate limit" in str(e).lower():
                 logging.warning(f"Local rate limit hit during contextualized embed: {e}")
             raise
+
+    def _batch_contextualized_embed(self, inputs: List[List[str]]) -> List[List[List[str]]]:
+        """Creates batches for contextulaized embeddings"""
+        batches = []
+        batch = []
+
+        num_tokens: int = 0
+        for document in inputs:
+            num_tokens += self.count_tokens(texts=document)
+
+            if num_tokens > 96_000:
+                batches.append(batch)
+                num_tokens = 0
+                batch = []
+
+            batch.append(document)
+
+        if batch:
+            batches.append(batch)
+
+        return batches
