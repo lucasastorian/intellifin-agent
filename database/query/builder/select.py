@@ -314,10 +314,10 @@ class SelectBuilder(PredMixin, SelectMixin):
         # Determine contextualization from the underlying field descriptor
         is_contextualized = getattr(underlying_field, 'contextualized', False)
         if is_contextualized:
-            print(f"Running contextualized vector search")
+            # print(f"Running contextualized vector search")
             query_embedding = await embedder.contextual_query_vector(query=query)
         else:
-            print(f"Running normal vector search")
+            # print(f"Running normal vector search")
             query_embedding = await embedder.query_vector(query=query)
 
         query_vec = np.array(query_embedding, dtype=np.float32)

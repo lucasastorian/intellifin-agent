@@ -9,6 +9,7 @@ from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 from agent.actions import BaseAction
 from agent.message import Message, Action
 from agent.clients.base_client import BaseClient
+from utils.retry import retry
 
 
 class ChatCompletionsOpenAIClient(BaseClient):
@@ -47,6 +48,16 @@ class ChatCompletionsOpenAIClient(BaseClient):
             params['tools'] = [action.openai_legacy_schema for action in allowed_actions]
             params['tool_choice'] = "required"
 
+        return await self._stream_with_retry(params)
+
+    @retry(
+        attempts=3,
+        base_delay=1.0,
+        backoff=2.0,
+        jitter=(0.1, 0.5),
+        retry_on=(openai.APIError, openai.BadRequestError, openai.APIConnectionError, openai.RateLimitError),
+    )
+    async def _stream_with_retry(self, params: dict):
         response = await self.client.chat.completions.create(**params)
         return await self.stream_completion(response=response)
 

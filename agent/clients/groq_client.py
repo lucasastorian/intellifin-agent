@@ -5,6 +5,7 @@ from typing import Literal, List
 from agent.message import Message
 from agent.actions import BaseAction
 from agent.clients.legacy_openai_client import ChatCompletionsOpenAIClient
+from utils.retry import retry
 
 
 class GroqClient(ChatCompletionsOpenAIClient):
@@ -45,6 +46,15 @@ class GroqClient(ChatCompletionsOpenAIClient):
             params['tools'] = [action.openai_legacy_schema for action in allowed_actions]
             params['tool_choice'] = "required"
 
-        response = await self.client.chat.completions.create(**params)
+        return await self._request_with_retry(params)
 
+    @retry(
+        attempts=3,
+        base_delay=1.0,
+        backoff=2.0,
+        jitter=(0.1, 0.5),
+        retry_on=(openai.APIError, openai.BadRequestError, openai.APIConnectionError, openai.RateLimitError),
+    )
+    async def _request_with_retry(self, params: dict):
+        response = await self.client.chat.completions.create(**params)
         return self._convert_response_to_message(response=response)

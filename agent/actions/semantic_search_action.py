@@ -491,7 +491,7 @@ class SemanticSearchAction(BaseAction):
         fp = r.get('fiscal_period') or '—'
 
         return (
-            f"**[Excerpt #{index} | ID: {excerpt_id}] Note: {note_title}**  Filing #{r['filing_id']}\n"
+            f"**[Excerpt #{index} |  Note: {note_title}**  Filing #{r['filing_id']}\n"
             f"{company_name} ({symbols}) | {form} | Fiscal: {fp} {fy} | Filed: {filing_date}\n\n"
             f"{content}\n\n---\n"
         )
@@ -527,10 +527,8 @@ class SemanticSearchAction(BaseAction):
         fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
             f"FY{fiscal_year}" if fiscal_year else "")
 
-        score = r.get('_score', 0.0)
-
         return (
-                f"**[Excerpt #{index} | ID: {excerpt_id}] {section} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"**[Excerpt #{index} | {section} ({page_display})** | Filing #{r['filing_id']}\n"
                 f"{company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
                 f"{content}\n\n---\n"
@@ -568,10 +566,8 @@ class SemanticSearchAction(BaseAction):
         fiscal_info = f"FY{fiscal_year} {fiscal_period}" if fiscal_year and fiscal_period else (
             f"FY{fiscal_year}" if fiscal_year else "")
 
-        score = r.get('_score', 0.0)
-
         return (
-                f"**[Excerpt #{index} | ID: {excerpt_id}] {attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"**[Excerpt #{index} | {attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
                 f"{company_name} ({symbols}) | {form} | Filed: {filing_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") +
                 (f"\n{description}" if description else "") + "\n\n" +
@@ -587,7 +583,6 @@ class SemanticSearchAction(BaseAction):
         fiscal_year = r['fiscal_year']
         fiscal_period = r['fiscal_period']
         sections = r['sections']
-        score = r.get('_score', 0.0)
 
         content_parts = []
         for section in sections:
@@ -598,7 +593,7 @@ class SemanticSearchAction(BaseAction):
         content = "\n\n".join(content_parts)
 
         return (
-            f"**[Excerpt #{index} | ID: {excerpt_id}] Earnings Transcript** | Transcript #{r['transcript_id']}\n"
+            f"**[Excerpt #{index} | Earnings Transcript** | Transcript #{r['transcript_id']}\n"
             f"{company_name} ({symbols}) | {fiscal_period} FY{fiscal_year}\n\n"
             f"{content}\n\n---\n"
         )

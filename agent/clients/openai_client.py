@@ -11,7 +11,6 @@ from utils.retry import retry
 
 
 class OpenAIClient(BaseClient):
-
     provider: str = "OpenAI"
 
     def __init__(self, model: str = "gpt-5", temperature: float = 1.0,
@@ -67,7 +66,7 @@ class OpenAIClient(BaseClient):
         base_delay=1.0,
         backoff=2.0,
         jitter=(0.1, 0.5),
-        retry_on=(openai.APIError, openai.APIConnectionError, openai.RateLimitError),
+        retry_on=(openai.APIError, openai.BadRequestError, openai.APIConnectionError, openai.RateLimitError),
     )
     async def _stream_with_retry(self, params: dict):
         """Create and consume a streaming response with minimal retries."""
@@ -76,7 +75,8 @@ class OpenAIClient(BaseClient):
 
     async def stream_completion(self, response: AsyncStream):
         """Streams a chat completion to the console"""
-        completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[], web_searches=[])
+        completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[],
+                             web_searches=[])
         tool_call_arguments = ""
 
         async for event in response:
