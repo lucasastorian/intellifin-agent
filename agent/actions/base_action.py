@@ -83,20 +83,24 @@ class BaseAction(ABC):
                 continue
 
             # Verify company exists in DB (synced_count=0 just means no NEW filings, not "not found")
-            company_row = await self.database.table("companies").select("id").contains("symbols", symbol).limit(1).execute()
+            company_row = await self.database.table("companies").select("id").contains("symbols", symbol).limit(
+                1).execute()
 
             if company_row.data:
                 if self.verbose:
                     if synced_count > 0:
-                        print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} {synced_count} new",
-                              flush=True)
+                        print(
+                            f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} {synced_count} new",
+                            flush=True)
                     else:
-                        print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} up to date",
-                              flush=True)
+                        print(
+                            f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✓', 'green')} up to date",
+                            flush=True)
             else:
                 if self.verbose:
-                    print(f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
-                          flush=True)
+                    print(
+                        f"  {self._c('⟳', 'yellow')} Syncing {sync_desc} from EDGAR... {self._c('✗', 'red')} Not found",
+                        flush=True)
                 not_found.append(symbol)
 
         return not_found
@@ -183,6 +187,23 @@ class BaseAction(ABC):
                 "type": "object",
                 "properties": json_schema['properties'],
                 "required": json_schema.get('required', [])
+            }
+        }
+
+    @property
+    def legacy_openai_schema(self) -> dict:
+        """Returns the legacy OpenAI completions API tool call format (still used by XAI)"""
+        json_schema = self.schema.model_json_schema(mode="serialization")
+        return {
+            "type": "function",
+            "function": {
+                "name": json_schema['title'],
+                "description": json_schema['description'],
+                "parameters": {
+                    "type": "object",
+                    "properties": json_schema['properties'],
+                    "required": json_schema.get('required', [])
+                },
             }
         }
 

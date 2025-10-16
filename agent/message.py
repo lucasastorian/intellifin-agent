@@ -176,3 +176,17 @@ class Message:
         blocks.sort(key=lambda b: b["index"])
 
         return [b["value"] for b in blocks]
+
+    def legacy_openai_format(self) -> dict:
+        """Returns the legacy chat completions formatted message"""
+        if self.role == "tool":
+            return {"role": "tool", "content": self.content, "tool_call_id": self.action_id}
+
+        elif self.role == "assistant":
+            tool_calls = [{"id": action.id, 'type': 'function',
+                           "function": {"name": action.name, "arguments": json.dumps(action.body)}} for action in
+                          self.actions]
+
+            return {"role": "assistant", "content": self.content, "tool_calls": tool_calls}
+
+        return {"role": self.role, "content": self.content}

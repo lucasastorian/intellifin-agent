@@ -34,10 +34,11 @@ PRICING = {
             "cached_input_per_million": 0.025,
         },
     },
-    "xai": {
-        "grok-4-0709": {
-            "input_per_million": 5.0,
+    "XAI": {
+        "grok-4": {
+            "input_per_million": 3.0,
             "output_per_million": 15.0,
+            "cached_input_per_million": 0.75
         },
     }
 }
