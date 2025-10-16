@@ -40,6 +40,13 @@ PRICING = {
             "output_per_million": 15.0,
             "cached_input_per_million": 0.75
         },
+    },
+    "Groq": {
+        "openai/gpt-oss-120b": {
+            "input_per_million": 0.15,
+            "output_per_million": 0.75,
+            "cached_input_per_million": 0.075
+        }
     }
 }
 

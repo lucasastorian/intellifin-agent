@@ -2,19 +2,16 @@ import os
 import openai
 from typing import Literal, List
 
-from agent.message import Message, Action
-from agent.actions.base_action import BaseAction
+from agent.message import Message
+from agent.actions import BaseAction
 from agent.clients.legacy_openai_client import ChatCompletionsOpenAIClient
 
 
-class XAIClient(ChatCompletionsOpenAIClient):
-    """xAI Grok client using OpenAI-compatible API"""
+class GroqClient(ChatCompletionsOpenAIClient):
 
-    # NOTE: XAI does NOT accept return usage statistics when streaming, so we're just going to disable streaming
+    provider = "Groq"
 
-    provider = "XAI"
-
-    def __init__(self, model: str = "grok-4-0709", temperature: float = 1.0,
+    def __init__(self, model: str = "openai/gpt-oss-120b", temperature: float = 1.0,
                  reasoning_effort: Literal['minimal', 'low', 'medium', 'high'] = 'medium',
                  verbose: bool = True,
                  tier: str = "tier-3"):
@@ -27,14 +24,13 @@ class XAIClient(ChatCompletionsOpenAIClient):
         )
 
         self.client = openai.AsyncOpenAI(
-            base_url="https://api.x.ai/v1",
-            api_key=os.getenv("XAI_API_KEY")
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY")
         )
 
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
                      allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
         """Streams a completion with the given messages"""
-        # NO support for reasoning effort in XAI client
         messages = ([{"role": "system", "content": system_prompt}] +
                     [message.legacy_openai_format() for message in messages])
 
@@ -43,7 +39,6 @@ class XAIClient(ChatCompletionsOpenAIClient):
             "temperature": self.temperature,
             "messages": messages,
             "tools": [action.openai_legacy_schema for action in actions],
-            # "stream": True
         }
 
         if allowed_actions:
@@ -53,5 +48,3 @@ class XAIClient(ChatCompletionsOpenAIClient):
         response = await self.client.chat.completions.create(**params)
 
         return self._convert_response_to_message(response=response)
-
-        # return await self.stream_completion(response=response)

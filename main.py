@@ -8,7 +8,7 @@ from edgar import set_identity
 from agent.agent import Agent
 from database import Database
 from schema import schema
-from agent.clients import OpenAIClient, AnthropicClient, XAIClient
+from agent.clients import OpenAIClient, AnthropicClient, XAIClient, GroqClient
 from utils.print_messages import print_messages
 from utils.run_summary import print_run_summary
 from pipeline.company_provisioner import CompanyProvisioner
@@ -35,6 +35,13 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
         client = XAIClient(
             model=model,
             temperature=1.0,
+            reasoning_effort=reasoning_effort
+        )
+
+    elif model == 'openai/gpt-oss-120b':
+        client = GroqClient(
+            model=model,
+            temperature=1,
             reasoning_effort=reasoning_effort
         )
 
@@ -73,7 +80,8 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='gpt-5',
                         choices=['gpt-5', 'gpt-5-mini',
                                  'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-1',
-                                 'grok-4'],
+                                 'grok-4',
+                                 "openai/gpt-oss-120b"],
                         help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='medium',

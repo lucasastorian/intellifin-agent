@@ -1,7 +1,9 @@
+import json
 import openai
 from jiter import from_json
 from typing import Literal, List
 from openai._streaming import AsyncStream
+from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
 
 from agent.actions import BaseAction
@@ -103,3 +105,35 @@ class ChatCompletionsOpenAIClient(BaseClient):
         completion.actions[-1].body = task_json
 
         return completion
+
+    @staticmethod
+    def _convert_response_to_message(response: ChatCompletion):
+        """Converts an OpenAI response to a Message object"""
+        content = response.choices[0].message.content
+        if response.usage.prompt_tokens_details:
+            cached_tokens = response.usage.prompt_tokens_details.cached_tokens
+        else:
+            cached_tokens = 0
+
+        uncached_tokens = response.usage.prompt_tokens - cached_tokens
+        if response.usage.completion_tokens_details:
+            thinking_tokens = response.usage.completion_tokens_details.reasoning_tokens
+        else:
+            thinking_tokens = 0
+
+        completion_tokens = response.usage.completion_tokens
+
+        if response.choices[0].message.tool_calls:
+            actions = [Action(id=call.id, name=call.function.name, status="parsed",
+                              body=json.loads(call.function.arguments))
+                       for call in response.choices[0].message.tool_calls]
+
+            return Message(role="assistant", content=content, status="completed", actions=actions,
+                           cached_prompt_tokens=cached_tokens,
+                           uncached_prompt_tokens=uncached_tokens, thinking_tokens=thinking_tokens,
+                           completion_tokens=completion_tokens)
+
+        return Message(content=content, role="assistant", status="completed",
+                       cached_prompt_tokens=cached_tokens,
+                       uncached_prompt_tokens=uncached_tokens, thinking_tokens=thinking_tokens,
+                       completion_tokens=completion_tokens)
