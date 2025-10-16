@@ -46,6 +46,16 @@ PRICING = {
             "input_per_million": 0.15,
             "output_per_million": 0.75,
             "cached_input_per_million": 0.075
+        },
+        "openai/gpt-oss-20b": {
+            "input_per_million": 0.10,
+            "output_per_million": 0.50,
+            "cached_input_per_million": 0.05
+        },
+        "moonshotai/kimi-k2-instruct-0905": {
+            "input_per_million": 1,
+            "output_per_million": 3,
+            "cached_input_per_million": 50
         }
     }
 }

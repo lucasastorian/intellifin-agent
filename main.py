@@ -81,7 +81,7 @@ if __name__ == '__main__':
                         choices=['gpt-5', 'gpt-5-mini',
                                  'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-1',
                                  'grok-4',
-                                 "openai/gpt-oss-120b"],
+                                 "openai/gpt-oss-120b", "openai/gpt-oss-20b", "moonshotai/kimi-k2-instruct-0905"],
                         help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
     parser.add_argument('--reasoning-effort', type=str, default='medium',
