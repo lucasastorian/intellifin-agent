@@ -1,3 +1,5 @@
+import asyncio
+
 import aiohttp
 import pandas as pd
 from pathlib import Path
@@ -17,9 +19,6 @@ class CompanyProvisioner:
 
     async def provision(self):
         csv_data = self._load_csv()
-
-        # Fetch both SEC data sources in parallel
-        import asyncio
         ticker_to_cik, exchange_data = await asyncio.gather(
             self._fetch_ticker_cik_mapping(),
             self._fetch_exchange_mapping()
@@ -30,9 +29,12 @@ class CompanyProvisioner:
         print(f"\n  → Upserting {len(records)} companies to database...", flush=True)
         await self.database.table("companies").upsert(records, on_conflict="cik").execute()
 
+        await asyncio.sleep(1)
+
         print(f" ✓ {len(records)} companies", flush=True)
 
-    def _merge_data(self, csv_data: Dict[str, Dict], ticker_to_cik: Dict[str, str], exchange_data: Dict[str, Dict]) -> List[Dict]:
+    @staticmethod
+    def _merge_data(csv_data: Dict[str, Dict], ticker_to_cik: Dict[str, str], exchange_data: Dict[str, Dict]) -> List[Dict]:
         cik_map = {}
 
         # Process all tickers from CSV

@@ -31,8 +31,11 @@ class FilingTenK(BaseFiling):
         await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
         # Filing notes and note chunks
-        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        if self.filing.reports:
+            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        else:
+            logger.warning(f"{self.accession_number} has no reports?")
 
         # Attachments and attachment chunks
         attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
@@ -41,6 +44,8 @@ class FilingTenK(BaseFiling):
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
                                          filing_id=filing['id'])
         await self._mark_synced(filing_id=filing['id'])
+
+        print(f"Upserted {self.filing.company} 10-K for FY ending {self.report_date}")
 
     async def _upsert_filing(self, xbrl: Optional[XBRL]) -> dict:
         """Creates a filing record"""

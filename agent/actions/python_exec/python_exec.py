@@ -156,7 +156,7 @@ class PythonExecAction(BaseAction):
                 except SyntaxError as e2:
                     raise SyntaxError(format_syntax_error(code, e2)) from e2
 
-            guard = ASTGuard()
+            guard = ASTGuard(safe_builtins=self.SAFE_BUILTINS)
             guard.visit(parsed)
 
             before_ns = dict(self.namespace)

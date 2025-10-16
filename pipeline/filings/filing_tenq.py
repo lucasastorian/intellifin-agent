@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from typing import Optional, List, Literal, Dict
+from typing import Optional, List,  Dict
 from edgar.xbrl import XBRL
 
 from pipeline.filings.base_filing import BaseFiling
@@ -28,9 +27,10 @@ class FilingTenQ(BaseFiling):
         sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
         await self._upsert_filing_section_chunks(filing=filing, sections=sections)
 
-        # Notes and note chunks
-        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        # Filing Notes
+        if self.filing.reports:
+            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
         # Attachments
         attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])

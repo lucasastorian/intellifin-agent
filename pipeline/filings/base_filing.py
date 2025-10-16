@@ -1,9 +1,10 @@
-import asyncio
+import httpx
 from bs4 import BeautifulSoup
 from abc import ABC, abstractmethod
 from typing import Optional, List, Literal, Dict
 from edgar.entity.filings import EntityFiling
 from edgar.xbrl import XBRL
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from database.database import Database
 from pipeline.parsers.parser import Parser
@@ -45,15 +46,36 @@ class BaseFiling(ABC):
         """Upserts the filing to the local db"""
         raise NotImplementedError
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=10, max=30),
+        retry=retry_if_exception_type((
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.ConnectTimeout,
+                httpx.RemoteProtocolError
+        ))
+    )
     async def _load_xbrl(self) -> XBRL:
         """Load XBRL using async SGML loading (caches result)"""
-        await self.filing.sgml_async()  # Cache SGML
-        return self.filing.xbrl()  # Use cached SGML
+        sgml_filing = await self.filing.sgml_async()  # Cache SGML
+        return self.filing.xbrl()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=10, max=30),
+        retry=retry_if_exception_type((
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.ConnectTimeout,
+                httpx.RemoteProtocolError
+        ))
+    )
     async def _load_html(self) -> str:
         """Load HTML using async SGML loading (caches result)"""
-        await self.filing.sgml_async()  # Cache SGML
-        return self.filing.html()
+        sgml_filing = await self.filing.sgml_async()  # Cache SGML
+        assert sgml_filing.html() is not None, f"SGML HTML for {self.accession_number} is None"
+        return sgml_filing.html()
 
     @staticmethod
     def infer_attachment_type(exhibit_number: str) -> str:
@@ -148,9 +170,6 @@ class BaseFiling(ABC):
 
     async def _upsert_filing_notes(self, filing_id: int):
         """Upserts all the notes associated with the filing and their chunks"""
-        if not self.filing.reports:
-            return None
-
         notes = self.filing.reports.get_by_category("Notes")
         processed_notes = []
 
@@ -268,6 +287,9 @@ class BaseFiling(ABC):
             if not document.document_type or not document.document_type.startswith("EX-"):
                 continue
 
+            assert document.sgml_document.content is not None, (f"Attachment {document.extension} "
+                                                                f"for {self.accession_number} has None content")
+
             exhibit_number = document.document_type.replace("EX-", "")
 
             # # NOTE -> Hardcode this here...
@@ -334,7 +356,6 @@ class BaseFiling(ABC):
                 on_conflict="attachment_id,page"
             ).execute()
 
-        # Chunk all chunkable attachments
         if chunkable_attachments:
             await self._upsert_attachment_chunks(
                 chunkable_attachments=chunkable_attachments,
@@ -344,12 +365,7 @@ class BaseFiling(ABC):
 
         return attachments
 
-    async def _upsert_attachment_chunks(
-            self,
-            chunkable_attachments: list,
-            exhibit_to_attachment_id: dict,
-            filing_id: int
-    ):
+    async def _upsert_attachment_chunks(self, chunkable_attachments: list, exhibit_to_attachment_id: dict, filing_id: int):
         """Upserts chunks for each attachment separately for contextualized embeddings"""
         filing_data = {
             "form": self.filing.form,

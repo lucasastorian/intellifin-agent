@@ -305,9 +305,44 @@ class Database:
             if failures:
                 await self._write_failed_groups_to_outbox(failures)
 
+        except asyncio.CancelledError:
+            # If the calling code is cancelled, persist queued items to outbox for later retry
+            try:
+                pending = []
+                for (table, column), documents in (queue or {}).items():
+                    if not documents:
+                        continue
+                    ids = [row_id for doc in documents for row_id in doc["ids"]]
+                    texts = [text for doc in documents for text in doc["texts"]]
+                    if ids and texts:
+                        pending.append((table, column, ids, texts))
+                if pending:
+                    await self._write_failed_groups_to_outbox(pending)
+            finally:
+                emb_queue_var.reset(token)
+            raise
+        except Exception:
+            # On any exception inside the context, persist queued items to outbox and re-raise
+            try:
+                pending = []
+                for (table, column), documents in (queue or {}).items():
+                    if not documents:
+                        continue
+                    ids = [row_id for doc in documents for row_id in doc["ids"]]
+                    texts = [text for doc in documents for text in doc["texts"]]
+                    if ids and texts:
+                        pending.append((table, column, ids, texts))
+                if pending:
+                    await self._write_failed_groups_to_outbox(pending)
+            finally:
+                emb_queue_var.reset(token)
+            raise
         finally:
-            # Clean up
-            emb_queue_var.reset(token)
+            # Normal cleanup path
+            try:
+                emb_queue_var.reset(token)
+            except Exception:
+                pass
 
     async def _flush_embedding_queue(self, queue: Dict[Tuple[str, str], List[Dict[str, List]]]):
         """Embed and store all queued texts, choosing API based on schema.
@@ -338,13 +373,11 @@ class Database:
             if not documents:
                 continue
 
-            # Check schema for contextualized flag
             field = self.schema.get_table(table).get_fields()[column]
             is_contextualized = getattr(field, 'contextualized', False)
 
             try:
                 if is_contextualized:
-                    # Contextualized embeddings - preserve document boundaries
                     inputs = [doc["texts"] for doc in documents]
                     total_chunks = sum(len(doc["texts"]) for doc in documents)
 
@@ -353,7 +386,6 @@ class Database:
                         f"{len(documents)} documents, {total_chunks} chunks"
                     )
 
-                    # Returns nested list: List[List[float]] (one inner list per document)
                     nested_embeddings = await self.embedder.contextualized_embed(
                         inputs=inputs,
                         model="voyage-context-3",
@@ -361,11 +393,9 @@ class Database:
                         output_dimension=self.embedder.dimensions
                     )
 
-                    # Flatten nested embeddings for vector store write
                     embeddings = [emb for doc_embs in nested_embeddings for emb in doc_embs]
 
                 else:
-                    # Standard embeddings - flatten all documents
                     flat_texts = [text for doc in documents for text in doc["texts"]]
 
                     logging.debug(
@@ -375,7 +405,6 @@ class Database:
 
                     embeddings = await self.embedder.embed(flat_texts)
 
-                # Collect all IDs and convert embeddings to numpy
                 all_ids = [row_id for doc in documents for row_id in doc["ids"]]
                 vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 

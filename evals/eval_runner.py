@@ -176,6 +176,7 @@ class EvalRunner:
         """Run agent on all questions serially (one at a time) with real-time output."""
         results = []
         total_cost = 0.0
+        correct_count = 0
 
         print(f"\n{'='*80}")
         print(f"SERIAL EVAL: Running {len(questions)} questions one at a time")
@@ -225,17 +226,37 @@ class EvalRunner:
 
             results.append(agent_result)
 
-            # Print summary for this question
+            # Grade immediately after answer
             print(f"\n{'─'*80}")
             print(f"✓ Completed [{i}/{len(questions)}]")
             print(f"Answer: {result}")
             print(f"Time: {execution_time:.2f}s | Cost: ${cost:.4f} | Tokens: {agent.usage.input_tokens:,} in / {output_tokens:,} out | Iterations: {agent.num_iter}")
+
+            # Evaluate answer in real-time
+            print(f"\n🔍 Grading answer...")
+            is_correct, notes = await self.evaluator.evaluate(
+                question=question.question,
+                provided_answer=result or "No response",
+                actual_answer=question.ground_truth
+            )
+
+            if is_correct:
+                correct_count += 1
+                print(f"✅ CORRECT")
+            else:
+                print(f"❌ INCORRECT")
+
+            print(f"Expected: {question.ground_truth}")
+            print(f"Notes: {notes}")
+
+            print(f"\nRunning Score: {correct_count}/{i} ({correct_count/i:.1%})")
             print(f"Running Total Cost: ${total_cost:.4f}")
             print(f"{'─'*80}\n")
 
         print(f"\n{'='*80}")
         print(f"SERIAL EVAL COMPLETE")
         print(f"Total Questions: {len(questions)}")
+        print(f"Final Score: {correct_count}/{len(questions)} ({correct_count/len(questions):.1%})")
         print(f"Total Cost: ${total_cost:.4f}")
         print(f"{'='*80}\n")
 
@@ -295,7 +316,7 @@ class EvalRunner:
     ) -> List[bool]:
         """Grade all answers in parallel"""
         async def grade_single(question: Question, answer: str) -> bool:
-            is_correct = await self.evaluator.evaluate(
+            is_correct, _ = await self.evaluator.evaluate(
                 question=question.question,
                 provided_answer=answer,
                 actual_answer=question.ground_truth

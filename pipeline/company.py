@@ -56,7 +56,6 @@ class Company:
 
         lock = await self._get_company_lock(ticker=self.symbol)
         async with lock:
-            # Batch ALL embeddings (filings + transcripts) together
             async with self.database.batch_embeddings():
                 synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
                                                           start_date=start_date,
@@ -89,12 +88,14 @@ class Company:
 
             return True
 
-        # Process filings (batch context is managed by caller in upsert())
         tasks = [upsert_filing_async(filing) for filing in filings]
 
+        newly_synced = 0
         for coro in asyncio.as_completed(tasks):
             try:
-                await coro
+                result = await coro
+                if result:
+                    newly_synced += 1
             except Exception as e:
                 import logging
                 import traceback
@@ -131,7 +132,9 @@ class Company:
         else:
             years = list(range(self.start_year, self.end_year))
 
-        return await edgar_company.get_filings_async(form=forms_to_load, year=years)
+        filings = await edgar_company.get_filings_async(form=forms_to_load, year=years)
+
+        return filings
 
     @staticmethod
     def _filter_filings_by_date(filings: EntityFilings, start_date: Optional[str] = None,

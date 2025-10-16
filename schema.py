@@ -126,7 +126,7 @@ class FilingNoteChunks(Table):
 
     index = Integer(nullable=False)
     content = Text(nullable=False, fts=True)
-    embedding = Text(nullable=False, fts=True, vector=True)
+    embedding = Text(nullable=False, fts=True, vector=True, contextualized=True)
     has_table = Boolean(nullable=False, default=False, index=True)
 
     filing_note_id = Integer(nullable=False, foreign_key="filing_notes.id", on_delete="CASCADE", index=True)
@@ -197,7 +197,7 @@ class FilingSectionChunks(Table):
     index = Integer(nullable=False)
     page = Integer(nullable=False, index=True)  # original page number
     pages = JSONField(nullable=False)  # List of {page: int, content: str}
-    embedding = Text(nullable=False, fts=True, vector=True)
+    embedding = Text(nullable=False, fts=True, vector=True, contextualized=True)
     has_table = Boolean(default=False, index=True)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
@@ -401,7 +401,7 @@ class FilingAttachments(Table):
         index=True
     )
     title = Text(nullable=True, fts=True)  # LLM-generated title
-    summary = Text(nullable=True, fts=True, vector=True)  # LLM-generated summary (context from header baked in)
+    summary = Text(nullable=True, fts=True, vector=True, contextualized=True)  # LLM-generated summary (context from header baked in)
 
     filing_id = Integer(nullable=False, foreign_key="filings.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
@@ -436,7 +436,7 @@ class FilingAttachmentChunks(Table):
     index = Integer(nullable=False)
     page = Integer(nullable=False)
     pages = JSONField(nullable=False)  # List of {page: int, content: str}
-    embedding = Text(nullable=False, fts=True, vector=True)  # Header + content for vector search
+    embedding = Text(nullable=False, fts=True, vector=True, contextualized=True)  # Header + content for vector search
     has_table = Boolean(nullable=False, default=False, index=True)
 
     attachment_id = Integer(nullable=False, foreign_key="filing_attachments.id", on_delete="CASCADE", index=True)
@@ -475,7 +475,7 @@ class EarningsTranscriptChunks(Table):
     index = Integer(nullable=False)
 
     sections = JSONField(nullable=False)
-    embedding = Text(nullable=False, fts=True, vector=True)
+    embedding = Text(nullable=False, fts=True, vector=True, contextualized=True)
 
     transcript_id = Integer(nullable=False, foreign_key="earnings_transcripts.id", on_delete="CASCADE", index=True)
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)

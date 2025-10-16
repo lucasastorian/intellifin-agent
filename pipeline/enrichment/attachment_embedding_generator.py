@@ -17,6 +17,7 @@ class AttachmentEmbeddingGenerator(BaseEmbeddingGenerator):
             if description:
                 attachment_parts.append(description)
             return f"\n## {' - '.join(attachment_parts)}\n"
+
         return ""
 
     async def embed(self, pages: List[dict], attachment_type: str, exhibit_number: str, description: str = None) -> List[dict]:

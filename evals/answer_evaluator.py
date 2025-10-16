@@ -23,6 +23,7 @@ class Evaluation(BaseModel):
     answer_correct: Literal['Yes', 'No'] = Field(
         description="Whether the answer is factually correct"
     )
+    notes: str = Field(description="Some comments on your findings")
 
 
 class Evaluator:
@@ -32,8 +33,8 @@ class Evaluator:
 
         self.client = openai.AsyncOpenAI()
 
-    async def evaluate(self, question: str, provided_answer: str, actual_answer: str) -> bool:
-        """pass"""
+    async def evaluate(self, question: str, provided_answer: str, actual_answer: str) -> tuple[bool, str]:
+        """Evaluate an answer and return (is_correct, notes)"""
         message = f"""
         # Evaluation Task
 
@@ -58,4 +59,5 @@ class Evaluator:
             text_format=Evaluation,
         )
 
-        return response.output_parsed.answer_correct == 'Yes'
+        evaluation = response.output_parsed
+        return (evaluation.answer_correct == 'Yes', evaluation.notes)

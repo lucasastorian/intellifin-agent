@@ -24,7 +24,7 @@ class MarkdownChunk:
 
     @property
     def data(self) -> List[dict]:
-        """Returns a list of block data"""
+        """Returns a list of block data grouped by page with ONLY the chunk's content"""
         page_blocks = {}
 
         for block in self.blocks:
@@ -34,6 +34,7 @@ class MarkdownChunk:
 
         page_content_data = []
         for page, blocks in page_blocks.items():
+            # Only include the content from blocks in THIS chunk, not full page content
             page_content = "\n".join(block.content for block in blocks)
             if not page_content.strip():
                 continue
@@ -47,7 +48,7 @@ class MarkdownChunk:
 
     @property
     def pages(self) -> List[dict]:
-        """Returns a list of pages with their content - each page has 'page' and 'content' keys"""
+        """Returns a list of pages with ONLY this chunk's content (not full page content)"""
         return self.data
 
     @property
@@ -61,6 +62,11 @@ class MarkdownChunk:
     def has_table(self) -> bool:
         """Returns True if this chunk contains one or more table blocks"""
         return any(block.block_type == 'Table' for block in self.blocks)
+
+    @property
+    def num_tokens(self) -> int:
+        """Returns the total number of tokens in this chunk"""
+        return sum(block.tokens for block in self.blocks)
 
     def __repr__(self):
         return f"MarkdownChunk(page={self.page}, blocks={len(self.blocks)})"

@@ -30,6 +30,10 @@ class SystemPrompt:
         
         Or if you know exactly which filing / attachment you want to read, you can read it directly via ReadAttachment.
         
+        When searching or listing filings, be aware that you are filtering by the filing_date of that filing...  
+        
+        This is often a few months AFTER the end of the fiscal period for the company. So add generous buffer.
+        
         3). Calculation / synthesis: Once you have collected the relevant information, you may still have to calculate the final metrics.
         
         Here, use python code execution to calculate, instead of mentally estimating percentages/quantities.

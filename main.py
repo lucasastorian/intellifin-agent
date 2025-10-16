@@ -27,12 +27,13 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
     asyncio.run(provisioner.provision())
 
     if tickers and run_presync:
-        asyncio.run(presync_tickers(
-            tickers=tickers.split(','),
-            database=database,
-            edgar_user_agent=user_agent,
-            start_year=2018
-        ))
+        asyncio.run(
+            presync_tickers(
+                tickers=tickers.split(','),
+                database=database,
+                edgar_user_agent=user_agent,
+                start_year=2018
+            ))
 
     agent = Agent(
         database=database,

@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import List, Optional
 
 from database import Database
-from edgar.async_api import preload_ticker_lookup_async
 from edgar.httpclient import async_http_client
 from pipeline.company import Company
 
