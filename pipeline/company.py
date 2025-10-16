@@ -2,10 +2,10 @@ import os
 import aiohttp
 import asyncio
 from datetime import date
-# Progress display removed for compatibility; simple asyncio gather used instead
 from typing import List, Optional, Dict
 from edgar import Company as EdgarCompany, set_identity
 from edgar.entity.filings import EntityFilings, EntityFiling
+from edgar.async_api import get_company_async
 
 from database.database import Database
 from pipeline.filings.base_filing import BaseFiling
@@ -31,58 +31,49 @@ class Company:
                  end_year: int = 2027, verbose: bool = True):
         self.symbol = symbol.upper()
         self.database = database
+        self.edgar_user_agent = edgar_user_agent
         self.start_year = start_year
         self.end_year = end_year
         self.verbose = verbose
 
-        set_identity(edgar_user_agent)
-        self.company = EdgarCompany(cik_or_ticker=self.symbol)
+    async def upsert(self, forms: Optional[List[str]] = None,
+                     start_date: Optional[str] = None, end_date: Optional[str] = None,
+                     include_earnings_transcripts: bool = True) -> int:
+        """Upsert company filings and transcripts with concurrency protection."""
+        # NOTE: Need to use the async API, because syncronous edgar tools blocks event loop indefinetly
+        edgar_company = await get_company_async(cik_or_ticker=self.symbol, user_agent=self.edgar_user_agent)
 
-    async def upsert(self, forms: Optional[List[str]] = None, start_date: Optional[str] = None,
-                     end_date: Optional[str] = None, include_earnings_transcripts: bool = False) -> int:
-        """
-        Upsert company filings and transcripts with concurrency protection.
+        if edgar_company.not_found:
+            if self.verbose:
+                print(f"    • Company not found on EDGAR: {self.symbol}", flush=True)
+            return 0
 
-        Uses an asyncio.Lock per ticker to prevent multiple concurrent syncs
-        of the same company, which would cause redundant API calls to EDGAR and FMP.
-        """
-        lock = await self._get_company_lock(self.symbol)
+        company = await self._get_company()
+        if company is None:
+            if self.verbose:
+                print(f"    • Company missing from local DB: {self.symbol}", flush=True)
+            return 0
 
+        lock = await self._get_company_lock(ticker=self.symbol)
         async with lock:
-            if self.company.not_found:
-                if self.verbose:
-                    print(f"    • Company not found on EDGAR: {self.symbol}", flush=True)
-                return 0
-
-            company = await self._get_company()
-            if company is None:
-                if self.verbose:
-                    print(f"    • Company missing from local DB: {self.symbol}", flush=True)
-                return 0
-
-            synced_count = await self._upsert_filings(company=company, forms=forms, start_date=start_date,
+            synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
+                                                      start_date=start_date,
                                                       end_date=end_date)
 
             if include_earnings_transcripts:
                 await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
 
-            return synced_count
+        return synced_count
 
-    async def on_sync_complete(self, company_id: int):
-        if self.company.fiscal_year_end:
+    async def on_sync_complete(self, edgar_company: EdgarCompany, company_id: int):
+        if edgar_company.fiscal_year_end:
             await self.database.table("companies").update(
-                {"fiscal_year_end": self.company.fiscal_year_end}).eq("id", company_id).execute()
+                {"fiscal_year_end": edgar_company.fiscal_year_end}).eq("id", company_id).execute()
 
-    async def _upsert_filings(self, company: dict, forms: Optional[List[str]] = None,
+    async def _upsert_filings(self, company: dict, edgar_company: EdgarCompany, forms: Optional[List[str]] = None,
                               start_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
-        filings = await self._load_filings(forms=forms, start_date=start_date, end_date=end_date)
-
-        if self.verbose:
-            try:
-                count_hint = len(filings)
-            except Exception:
-                count_hint = 'unknown'
-            print(f"      · Loaded filings: {count_hint}", flush=True)
+        filings = await self._load_filings(edgar_company=edgar_company, forms=forms, start_date=start_date,
+                                           end_date=end_date)
 
         if start_date or end_date:
             filings = self._filter_filings_by_date(filings, start_date, end_date)
@@ -92,51 +83,16 @@ class Company:
                 return False
 
             parser = self._get_filing_parser(filing=filing, company=company)
-
-            try:
-                await asyncio.wait_for(parser.upsert(), timeout=300)
-            except asyncio.TimeoutError:
-                if self.verbose:
-                    print(f"          ⚠ Timeout upserting {filing.accession_number}", flush=True)
-                return False
+            await asyncio.wait_for(parser.upsert(), timeout=300)
 
             return True
 
         tasks = [upsert_filing_async(filing) for filing in filings]
-        synced = 0
-
-        pbar = None
-        if self.verbose:
-            try:
-                from tqdm import tqdm
-                pbar = tqdm(total=len(tasks), desc=f"Sync {self.symbol} filings", unit="filing")
-            except Exception:
-                pbar = None
 
         for coro in asyncio.as_completed(tasks):
-            try:
-                r = await coro
-                if r:
-                    synced += 1
-            except Exception as e:
-                if self.verbose:
-                    msg = f"          ⚠ Filing task error: {e}"
-                    if pbar is not None:
-                        try:
-                            from tqdm import tqdm as _tqdm
-                            _tqdm.write(msg)
-                        except Exception:
-                            print(msg, flush=True)
-                    else:
-                        print(msg, flush=True)
-            finally:
-                if pbar is not None:
-                    pbar.update(1)
+            await coro
 
-        if pbar is not None:
-            pbar.close()
-
-        return synced
+        return len(tasks)
 
     async def _get_company(self) -> Optional[dict]:
         response = await self.database.table(
@@ -148,7 +104,7 @@ class Company:
 
         return response.data[0]
 
-    async def _load_filings(self, forms: Optional[List[str]] = None,
+    async def _load_filings(self, edgar_company: EdgarCompany, forms: Optional[List[str]] = None,
                             start_date: Optional[str] = None,
                             end_date: Optional[str] = None) -> EntityFilings:
         """Load filings from EDGAR without blocking the event loop.
@@ -168,7 +124,7 @@ class Company:
         else:
             years = list(range(self.start_year, self.end_year))
 
-        return self.company.get_filings(form=forms_to_load, year=years)
+        return edgar_company.get_filings(form=forms_to_load, year=years)
 
     @staticmethod
     def _filter_filings_by_date(filings: EntityFilings, start_date: Optional[str] = None,
@@ -277,7 +233,7 @@ class Company:
     async def _upsert_transcript(self, data: dict, company: dict):
         """Upserts a single transcript"""
         transcript = Transcript(content=data['content'], fiscal_year=data['year'], fiscal_quarter=data['quarter'],
-                                date=date['date'], company=company, database=self.database)
+                                date=data['date'], company=company, database=self.database)
         return await transcript.upsert()
 
     async def _load_transcripts(self):
@@ -365,14 +321,12 @@ class Company:
 
     @staticmethod
     async def _get_company_lock(ticker: str) -> asyncio.Lock:
-        """
-        Get or create an asyncio.Lock for the given ticker.
+        """Get or create a lock for the ticker.
 
-        This prevents multiple Company instances from syncing the same ticker
-        concurrently, avoiding redundant EDGAR/FMP API calls.
+        The outer lock prevents race conditions where multiple coroutines
+        try to create the same ticker's lock simultaneously.
         """
         ticker = ticker.upper()
         async with _locks_lock:
-            if ticker not in _company_sync_locks:
-                _company_sync_locks[ticker] = asyncio.Lock()
-            return _company_sync_locks[ticker]
+            _company_sync_locks.setdefault(ticker, asyncio.Lock())
+        return _company_sync_locks[ticker]

@@ -1,6 +1,8 @@
 import os
 import sys
 import asyncio
+import traceback
+
 import tiktoken
 from typing import List, Set, Optional
 from pydantic import BaseModel
@@ -58,8 +60,6 @@ class BaseAction(ABC):
                 sync_desc += f" [{' '.join(parts)}]"
 
             try:
-                if self.verbose:
-                    print(f"  → Sync start: {sync_desc}", flush=True)
                 synced_count = await asyncio.wait_for(
                     company.upsert(
                         forms=forms,
@@ -67,7 +67,7 @@ class BaseAction(ABC):
                         end_date=end_date,
                         include_earnings_transcripts=include_earnings_transcripts
                     ),
-                    timeout=int(os.environ.get("INTELLIFIN_SYNC_TIMEOUT", "600"))
+                    timeout=600
                 )
             except asyncio.TimeoutError:
                 if self.verbose:
@@ -77,6 +77,7 @@ class BaseAction(ABC):
 
             except Exception as e:
                 if self.verbose:
+                    traceback.print_exc()
                     print(f"  {self._c('✗', 'red')} Sync error for {symbol}: {e}", flush=True)
                 not_found.append(symbol)
                 continue

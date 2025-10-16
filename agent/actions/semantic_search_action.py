@@ -165,9 +165,6 @@ class SemanticSearchAction(BaseAction):
             "earnings_transcripts" in args.document_types
         )
 
-        if self.verbose:
-            print("  → Syncing symbols before search...", flush=True)
-
         not_found = await self.sync_symbols(
             symbols=[args.symbol],
             forms=forms,

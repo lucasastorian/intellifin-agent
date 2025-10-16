@@ -11,6 +11,16 @@ PRICING = {
             "output_per_million": 15.0,
             "cached_input_per_million": 0.3,
         },
+        "claude-haiku-4-5": {
+            "input_per_million": 1.0,
+            "output_per_million": 5.0,
+            "cached_input_per_million": 0.1,
+        },
+        "claude-opus-4-1": {
+            "input_per_million": 15,
+            "output_per_million": 75.0,
+            "cached_input_per_million": 1.50,
+        }
     },
     "OpenAI": {
         "gpt-5": {
@@ -53,11 +63,11 @@ def get_pricing(provider: str, model: str = None):
 
 
 def calculate_cost(
-    uncached_input_tokens: int,
-    cached_input_tokens: int,
-    output_tokens: int,
-    provider: str,
-    model: str
+        uncached_input_tokens: int,
+        cached_input_tokens: int,
+        output_tokens: int,
+        provider: str,
+        model: str
 ) -> float:
     """Calculate cost in USD for token usage."""
     pricing = get_pricing(provider, model)

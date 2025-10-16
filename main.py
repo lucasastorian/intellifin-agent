@@ -3,6 +3,7 @@ import argparse
 import logging
 from typing import Literal
 from dotenv import load_dotenv
+from edgar import set_identity
 
 from agent.agent import Agent
 from database import Database
@@ -23,14 +24,14 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
             reasoning_effort=reasoning_effort
         )
 
-    elif args.model in ['claude-sonnet-4-5', 'claude-opus-4-1']:
+    elif model in ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-1']:
         client = AnthropicClient(
             model=model,
             temperature=1.0,
             reasoning_effort=reasoning_effort
         )
 
-    elif args.model == 'grok-4':
+    elif model == 'grok-4':
         client = XAIClient(
             model=model,
             temperature=1.0,
@@ -38,12 +39,14 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
         )
 
     else:
-        raise ValueError(f"Did not recognize model {args.model}")
+        raise ValueError(f"Did not recognize model {model}")
+
+    set_identity(user_agent)
 
     database = Database(schema=schema, base_path="./data/intellifin.db")
 
     provisioner = CompanyProvisioner(database=database, edgar_user_agent=user_agent)
-    provisioner.provision()
+    asyncio.run(provisioner.provision())
 
     agent = Agent(
         database=database,
@@ -68,12 +71,14 @@ if __name__ == '__main__':
     parser.add_argument('--user-agent', type=str)
 
     parser.add_argument('--model', type=str, default='gpt-5',
-                        choices=['gpt-5', 'gpt-5-mini', 'claude-sonnet-4-5', 'claude-opus-4-1', 'grok-4'],
+                        choices=['gpt-5', 'gpt-5-mini',
+                                 'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-1',
+                                 'grok-4'],
                         help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
-    parser.add_argument('--reasoning-effort', type=str, default='minimal',
+    parser.add_argument('--reasoning-effort', type=str, default='medium',
                         choices=['minimal', 'low', 'medium', 'high'],
-                        help='Reasoning effort level (default: minimal)')
+                        help='Reasoning effort level (default: medium)')
 
     args = parser.parse_args()
 

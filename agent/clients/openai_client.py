@@ -1,6 +1,8 @@
 import os
 
 import openai
+import asyncio
+from typing import Optional
 from jiter import from_json
 from openai import AsyncStream
 from typing import Literal, List
@@ -26,7 +28,8 @@ class OpenAIClient(BaseClient):
 
         self.client = openai.AsyncOpenAI(
             base_url="https://api.openai.com/v1",
-            api_key=os.environ['OPENAI_API_KEY']
+            api_key=os.environ['OPENAI_API_KEY'],
+            timeout=300.0,
         )
 
         self.tool_call_arguments = ""
@@ -61,8 +64,9 @@ class OpenAIClient(BaseClient):
                 ]
             }
 
-        response = await self.client.responses.create(**params)
-        return await self.stream_completion(response=response)
+        stream = await self.client.responses.create(**params)
+
+        return await self.stream_completion(response=stream)
 
     async def stream_completion(self, response: AsyncStream):
         """Streams a chat completion to the console"""
