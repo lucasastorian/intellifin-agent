@@ -3,9 +3,9 @@ import aiohttp
 import asyncio
 from datetime import date
 from typing import List, Optional, Dict
-from edgar import Company as EdgarCompany, set_identity
+from edgar import Company as EdgarCompany
 from edgar.entity.filings import EntityFilings, EntityFiling
-from edgar.async_api import get_company_async, load_full_filings_async
+from edgar.async_api import get_company_async
 
 from database.database import Database
 from pipeline.filings.base_filing import BaseFiling
@@ -56,12 +56,14 @@ class Company:
 
         lock = await self._get_company_lock(ticker=self.symbol)
         async with lock:
-            synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
-                                                      start_date=start_date,
-                                                      end_date=end_date)
+            # Batch ALL embeddings (filings + transcripts) together
+            async with self.database.batch_embeddings():
+                synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
+                                                          start_date=start_date,
+                                                          end_date=end_date)
 
-            if include_earnings_transcripts:
-                await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
+                if include_earnings_transcripts:
+                    await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
 
         return synced_count
 
@@ -87,10 +89,19 @@ class Company:
 
             return True
 
+        # Process filings (batch context is managed by caller in upsert())
         tasks = [upsert_filing_async(filing) for filing in filings]
 
         for coro in asyncio.as_completed(tasks):
-            await coro
+            try:
+                await coro
+            except Exception as e:
+                import logging
+                import traceback
+                logging.error(
+                    f"Failed to upsert filing for {self.symbol}: {e}\n"
+                    f"{''.join(traceback.format_exception(type(e), e, e.__traceback__))}"
+                )
 
         return len(tasks)
 
@@ -107,11 +118,7 @@ class Company:
     async def _load_filings(self, edgar_company: EdgarCompany, forms: Optional[List[str]] = None,
                             start_date: Optional[str] = None,
                             end_date: Optional[str] = None) -> EntityFilings:
-        """Load filings from EDGAR without blocking the event loop.
-
-        - Narrows the year range based on optional start/end dates to reduce network calls.
-        - Offloads the synchronous EDGAR call to a thread using asyncio.to_thread.
-        """
+        """Load filings from EDGAR without blocking the event loop."""
         forms_to_load = forms if forms else self.forms
 
         if start_date or end_date:
@@ -124,9 +131,7 @@ class Company:
         else:
             years = list(range(self.start_year, self.end_year))
 
-        await load_full_filings_async(edgar_company)
-
-        return edgar_company.get_filings(form=forms_to_load, year=years)
+        return await edgar_company.get_filings_async(form=forms_to_load, year=years)
 
     @staticmethod
     def _filter_filings_by_date(filings: EntityFilings, start_date: Optional[str] = None,
@@ -198,10 +203,6 @@ class Company:
             all_transcript_dates = await self._load_transcript_dates(session)
             filtered_dates = self._filter_transcript_dates(all_transcript_dates, start_date, end_date)
             fiscal_years_needed = set(meta['fiscalYear'] for meta in filtered_dates)
-            if self.verbose:
-                print(
-                    f"      · Transcripts available: {len(all_transcript_dates)} | in range: {len(filtered_dates)} | years: {sorted(fiscal_years_needed)}",
-                    flush=True)
 
             years_to_load = []
             for fiscal_year in fiscal_years_needed:
@@ -219,6 +220,14 @@ class Company:
             for batch_data in batch_results:
                 for transcript_data in batch_data:
                     if self._is_transcript_in_range(transcript_data, filtered_dates):
+                        # Skip if transcript already exists
+                        if await self._is_transcript_synced(
+                                company_id=company['id'],
+                                fiscal_year=transcript_data['year'],
+                                fiscal_quarter=transcript_data['quarter']
+                        ):
+                            continue
+
                         transcript = Transcript(
                             content=transcript_data['content'],
                             fiscal_year=transcript_data['year'],
@@ -292,6 +301,15 @@ class Company:
             filtered.append(meta)
 
         return filtered
+
+    async def _is_transcript_synced(self, company_id: int, fiscal_year: int, fiscal_quarter: int) -> bool:
+        """Check if a specific transcript already exists in the database"""
+        fiscal_period = f"Q{fiscal_quarter}" if fiscal_quarter != 3 else "FY"
+        response = await self.database.table("earnings_transcripts").select("id").eq(
+            "company_id", company_id
+        ).eq("fiscal_year", fiscal_year).eq("fiscal_period", fiscal_period).limit(1).execute()
+
+        return len(response.data) > 0
 
     async def _are_all_transcripts_synced_for_year(self, company_id: int, fiscal_year: int,
                                                    all_transcript_dates: List[dict]) -> bool:

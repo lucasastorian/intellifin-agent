@@ -29,11 +29,12 @@ class Transcript:
     async def _upsert_transcript(self, sections: List[Dict[str, str]]) -> int:
         """Upserts the transcript and returns the transcript ID"""
         dt = datetime.datetime.strptime(self.date, "%Y-%m-%d %H:%M:%S")
+        fiscal_period = f"Q{self.fiscal_quarter}" if self.fiscal_quarter != 3 else "FY"
 
         response = await self.database.table("earnings_transcripts").upsert({
             "sections": sections,
             "fiscal_year": self.fiscal_year,
-            "fiscal_period": f"Q{self.fiscal_quarter}" if self.fiscal_quarter != 3 else "FY",
+            "fiscal_period": fiscal_period,
             "date": dt.isoformat(),
             "company_id": self.company['id']
         }, on_conflict="company_id,fiscal_year,fiscal_period").execute()

@@ -170,21 +170,17 @@ class BaseFiling(ABC):
         return note_ids, processed_notes
 
     async def _upsert_filing_note_chunks(self, note_ids: list, processed_notes: list, filing: dict):
-        """Chunks filing notes and upserts them"""
+        """Chunks filing notes and upserts each note separately for contextualized embeddings"""
         generator = NoteEmbeddingGenerator(company=self.company, filing=filing, chunk_size=2048, chunk_overlap=0)
 
-        # NOTE: voyage-context-3 compatibility issue
-        # Currently mixing chunks from MULTIPLE notes (separate documents) in one upsert batch.
-        # For contextualized embeddings, each note should be embedded separately to maintain
-        # context awareness within that specific note. Future optimization needed to group by
-        # note_id before embedding without excessive DB overhead.
-        all_chunks = []
-
+        # Upsert each note's chunks separately to preserve document boundaries
+        # for contextualized embeddings (voyage-context-3 compatibility)
         for note_id, note_data in zip(note_ids, processed_notes):
             chunks = await generator.embed(note_title=note_data['title'], note_content=note_data['content'])
 
+            note_chunks = []
             for i, chunk in enumerate(chunks):
-                all_chunks.append({
+                note_chunks.append({
                     "index": i,
                     "content": chunk.content,
                     "embedding": chunk.embedding_text,  # Uses header + content
@@ -194,11 +190,11 @@ class BaseFiling(ABC):
                     "company_id": self.company_id
                 })
 
-        if all_chunks:
-            await self.database.table("filing_note_chunks").upsert(
-                all_chunks,
-                on_conflict="filing_note_id,index"
-            ).execute()
+            if note_chunks:
+                await self.database.table("filing_note_chunks").upsert(
+                    note_chunks,
+                    on_conflict="filing_note_id,index"
+                ).execute()
 
     async def _upsert_financial_statements(self, xbrl: Optional[XBRL], filing_id: int):
         """Upserts the financial statements for 10-Ks/10-Qs/20-Fs"""
@@ -354,7 +350,7 @@ class BaseFiling(ABC):
             exhibit_to_attachment_id: dict,
             filing_id: int
     ):
-        """Upserts all attachment chunks in a single operation for chunkable attachment types"""
+        """Upserts chunks for each attachment separately for contextualized embeddings"""
         filing_data = {
             "form": self.filing.form,
             "filing_date": self.filing_date,
@@ -362,13 +358,6 @@ class BaseFiling(ABC):
         }
 
         generator = AttachmentEmbeddingGenerator(self.company, filing_data, chunk_size=1024, chunk_overlap=0)
-
-        # NOTE: voyage-context-3 compatibility issue
-        # Currently mixing chunks from MULTIPLE attachments (separate documents like merger agreements,
-        # press releases, etc.) in one upsert batch. For contextualized embeddings, each attachment
-        # should be embedded separately to maintain context awareness within that specific exhibit.
-        # Future optimization needed to group by attachment_id before embedding without excessive DB overhead.
-        all_chunks_data = []
 
         for attachment_data in chunkable_attachments:
             exhibit_number = attachment_data["exhibit_number"]
@@ -379,8 +368,9 @@ class BaseFiling(ABC):
 
             chunks = await generator.embed(pages, attachment_type, exhibit_number, description)
 
+            attachment_chunks = []
             for i, chunk in enumerate(chunks):
-                all_chunks_data.append({
+                attachment_chunks.append({
                     "index": i,
                     "page": chunk.page,
                     "pages": chunk.pages,
@@ -391,11 +381,11 @@ class BaseFiling(ABC):
                     "company_id": self.company_id
                 })
 
-        if all_chunks_data:
-            await self.database.table("filing_attachment_chunks").upsert(
-                all_chunks_data,
-                on_conflict="attachment_id,index"
-            ).execute()
+            if attachment_chunks:
+                await self.database.table("filing_attachment_chunks").upsert(
+                    attachment_chunks,
+                    on_conflict="attachment_id,index"
+                ).execute()
 
     #
     # async def _enrich_attachments(self, attachment_data: List[Dict], filing: dict) -> List[Dict]:

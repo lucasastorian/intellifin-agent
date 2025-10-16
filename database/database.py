@@ -11,7 +11,7 @@ from typing import Union, List, Dict, Any, Tuple
 from .schema.schema import Schema
 from .vector_store import VectorStore
 from .clients.voyage_client import VoyageClient
-from .context import txn_depth_var, emb_queue_var, atomic_vectors_var
+from .context import emb_queue_var
 from .errors import (
     DatabaseError, ConstraintError, ForeignKeyError,
     UniqueConstraintError, NotNullViolation, CheckConstraintError
@@ -78,24 +78,17 @@ class Database:
             if self._closed:
                 return
 
-            # Warn if closing during an open transaction
-            if txn_depth_var.get() > 0:
+            # Warn if closing during active embedding batch
+            if emb_queue_var.get() is not None:
                 import logging
                 logging.warning(
-                    f"Closing database connection with {txn_depth_var.get()} open transaction(s). "
-                    "Rolling back uncommitted changes."
+                    "Closing database connection with active embedding batch. "
+                    "Queued embeddings will be lost."
                 )
                 try:
-                    self.conn.rollback()
+                    emb_queue_var.set(None)
                 except Exception:
                     pass
-
-                # Clear any dangling task-local queue to avoid state leaks
-                if emb_queue_var.get() is not None:
-                    try:
-                        emb_queue_var.set(None)
-                    except Exception:
-                        pass
 
             try:
                 # Checkpoint WAL to merge changes into main database file
@@ -262,123 +255,71 @@ class Database:
             self.vector_stores[key] = VectorStore(str(store_path), dim=512)
         return self.vector_stores[key]
 
-    def in_transaction(self) -> bool:
-        """Check if currently inside a transaction context.
-
-        Uses ContextVar to check per-task transaction depth.
-        """
-        return txn_depth_var.get() > 0
-
     @asynccontextmanager
-    async def transaction(self, *, atomic_vectors: bool = False, use_savepoints: bool = True):
-        """Async context manager for transactions with batched embeddings.
+    async def batch_embeddings(self):
+        """Batch all embedding generation within this context.
 
-        Automatically batches all embeddings during the transaction and flushes on commit.
-        Supports nesting via depth counters and SQLite SAVEPOINTs.
+        Defers embedding generation and vector store writes until context exit,
+        allowing hundreds/thousands of texts to be embedded in a single Voyage API call.
 
-        Args:
-            atomic_vectors: If True, embed first then commit (rollback possible if embed fails).
-                           If False (default), commit first then embed (better availability).
-            use_savepoints: Use SQLite SAVEPOINTs for nested transactions (default: True).
+        SQL operations run normally (no transaction management). Only embeddings are batched.
 
-        Usage:
-            async with db.transaction():
-                await db.table("notes").upsert([...]).execute()
-                await db.table("chunks").upsert([...]).execute()
-            # ↑ All embeddings batched into one or a few Voyage API calls per (table, column)
+        ASYNCIO SAFETY:
+        ✓ Safe with: await, asyncio.as_completed(), asyncio.gather(), asyncio.create_task()
+        ✓ ContextVars propagate to child tasks - all share the same embedding queue
+
+        Without this context:
+        - Each upsert with vector fields generates embeddings immediately
+        - Example: 100 filings → 100+ Voyage API calls
+
+        With this context:
+        - All upserts queue embeddings, flush at exit
+        - Example: 100 filings → ~8 Voyage API calls (batches of 128)
+
+        Example:
+            # Batch embeddings across all filings
+            async with db.batch_embeddings():
+                tasks = [filing.upsert() for filing in filings]
+                for coro in asyncio.as_completed(tasks):
+                    await coro
+            # Exit: generate all embeddings in minimal API calls
+
+        Failed embeddings are written to the outbox for later retry via
+        flush_vector_outbox().
         """
         if self._closed:
-            raise DatabaseError("Cannot start transaction on closed database connection")
+            raise DatabaseError("Cannot start embedding batch on closed database connection")
 
-        # Bind atomic_vectors flag to this task
-        token_atomic = atomic_vectors_var.set(atomic_vectors)
-
-        # Manage nesting depth
-        depth = txn_depth_var.get()
-        outermost = (depth == 0)
-        token_depth = txn_depth_var.set(depth + 1)
-
-        # Generate unique savepoint name (thread-safe)
-        savepoint_name = None
-        if not outermost and use_savepoints:
-            with self._lock:
-                self._sp_counter += 1
-                savepoint_name = f"sp_{self._sp_counter}"
-
-        # Outermost: open transaction and create embedding queue
-        if outermost:
-            queue = {}
-            token_queue = emb_queue_var.set(queue)
-            with self._lock:
-                self.conn.execute("BEGIN IMMEDIATE;")
-        else:
-            token_queue = None
-            if use_savepoints:
-                with self._lock:
-                    self.conn.execute(f"SAVEPOINT {savepoint_name};")
+        # Create queue for this context
+        queue = {}
+        token = emb_queue_var.set(queue)
 
         try:
             yield
 
-            if outermost:
-                if atomic_vectors_var.get():
-                    # Atomic mode: embed first, THEN commit
-                    # If embedding fails, we can rollback uncommitted SQL
-                    failed_groups = await asyncio.shield(self._flush_embedding_queue(emb_queue_var.get() or {}))
-                    with self._lock:
-                        self.conn.commit()
+            # Flush: generate embeddings and write to vector stores
+            # No shield - let cancellations propagate
+            failures = await self._flush_embedding_queue(queue)
 
-                    # Even in atomic mode, write failed vector store writes to outbox
-                    # (SQL already committed, but some vector stores may have failed)
-                    if failed_groups:
-                        import logging
-                        logging.warning(f"Some vector groups failed after atomic commit, writing to outbox")
-                        await self._write_failed_groups_to_outbox(failed_groups)
-                else:
-                    # Non-atomic mode: commit first, THEN try to embed
-                    # Better availability - SQL persists even if embeddings fail
-                    with self._lock:
-                        self.conn.commit()
+            # Write failed embeddings to outbox for retry
+            if failures:
+                await self._write_failed_groups_to_outbox(failures)
 
-                    failed_groups = await asyncio.shield(self._flush_embedding_queue(emb_queue_var.get() or {}))
-                    if failed_groups:
-                        # SQL already committed - write failures to outbox for retry
-                        import logging
-                        logging.error(f"Embedding flush failed after commit, writing to outbox")
-                        await self._write_failed_groups_to_outbox(failed_groups)
-            else:
-                # Nested transaction: release savepoint
-                if use_savepoints:
-                    with self._lock:
-                        self.conn.execute(f"RELEASE SAVEPOINT {savepoint_name};")
-
-        except Exception:
-            if outermost:
-                with self._lock:
-                    self.conn.rollback()
-            else:
-                if use_savepoints:
-                    with self._lock:
-                        self.conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name};")
-            raise
         finally:
-            # Decrement depth and clean up outermost state
-            try:
-                prev_depth = txn_depth_var.get()
-                txn_depth_var.set(max(prev_depth - 1, 0))
-            except Exception:
-                pass
+            # Clean up
+            emb_queue_var.reset(token)
 
-            atomic_vectors_var.reset(token_atomic)
-            if token_queue and outermost:
-                emb_queue_var.reset(token_queue)
+    async def _flush_embedding_queue(self, queue: Dict[Tuple[str, str], List[Dict[str, List]]]):
+        """Embed and store all queued texts, choosing API based on schema.
 
-    async def _flush_embedding_queue(self, queue: Dict[Tuple[str, str], Dict[str, List]]):
-        """Embed and store all queued texts in a single global pass, then route to stores.
+        For contextualized fields: uses voyage-context-3 with preserved document boundaries
+        For standard fields: flattens and uses standard embedding API
 
-        Flattens texts across groups for one logical embed call (the client may sub-batch
-        internally), then demuxes results back to each (table, column) vector store. Returns
-        a list of failed groups for outbox retry.
+        Args:
+            queue: Maps (table, column) -> List of documents, where each document is {"ids": [...], "texts": [...]}
+
+        Returns:
+            List of failed groups for outbox retry
         """
         if not queue:
             return []
@@ -390,70 +331,71 @@ class Database:
             )
 
         import logging
-        from typing import Tuple as _Tuple
-
-        # Build flat inputs and routing metadata
-        flat_texts: List[str] = []
-        idx_map: List[_Tuple[str, str, int]] = []  # (table, column, row_id) per text
-        group_indices: Dict[_Tuple[str, str], List[int]] = {}
-
-        for (table, column), payload in queue.items():
-            ids = payload.get("ids", [])
-            texts = payload.get("texts", [])
-            if not texts:
-                continue
-            start = len(flat_texts)
-            flat_texts.extend(texts)
-            idx_map.extend((table, column, rid) for rid in ids)
-            group_indices.setdefault((table, column), []).extend(range(start, start + len(texts)))
-
-        if not flat_texts:
-            return []
-
-        logging.debug(
-            f"Embedding global batch: {len(flat_texts)} texts across {len(group_indices)} groups"
-        )
-
-        # Single logical embed call; protect from outer cancellations
-        try:
-            import asyncio as _asyncio
-            embeddings = await _asyncio.shield(self.embedder.embed(flat_texts))
-        except Exception as e:
-            logging.error(f"Global embed failed: {e}")
-            failed = []
-            for (table, column), payload in queue.items():
-                if payload.get("texts"):
-                    failed.append((table, column, payload["ids"], payload["texts"]))
-            return failed
-
-        if len(embeddings) != len(flat_texts):
-            logging.error(
-                f"Embedding count mismatch: got {len(embeddings)} for {len(flat_texts)} inputs"
-            )
-            failed = []
-            for (table, column), payload in queue.items():
-                if payload.get("texts"):
-                    failed.append((table, column, payload["ids"], payload["texts"]))
-            return failed
-
-        # Demux results back to groups
-        grouped_vectors: Dict[_Tuple[str, str], _Tuple[List[int], List[np.ndarray]]] = {}
-        for i, (table, column, row_id) in enumerate(idx_map):
-            ids_list, vecs_list = grouped_vectors.setdefault((table, column), ([], []))
-            ids_list.append(row_id)
-            vecs_list.append(np.array(embeddings[i], dtype=np.float32))
 
         failed_groups = []
-        for (table, column), (ids, vectors) in grouped_vectors.items():
+
+        for (table, column), documents in queue.items():
+            if not documents:
+                continue
+
+            # Check schema for contextualized flag
+            field = self.schema.get_table(table).get_fields()[column]
+            is_contextualized = getattr(field, 'contextualized', False)
+
             try:
+                if is_contextualized:
+                    # Contextualized embeddings - preserve document boundaries
+                    inputs = [doc["texts"] for doc in documents]
+                    total_chunks = sum(len(doc["texts"]) for doc in documents)
+
+                    logging.debug(
+                        f"Contextualized embed {table}.{column}: "
+                        f"{len(documents)} documents, {total_chunks} chunks"
+                    )
+
+                    # Returns nested list: List[List[float]] (one inner list per document)
+                    nested_embeddings = await self.embedder.contextualized_embed(
+                        inputs=inputs,
+                        model="voyage-context-3",
+                        input_type="document",
+                        output_dimension=self.embedder.dimensions
+                    )
+
+                    # Flatten nested embeddings for vector store write
+                    embeddings = [emb for doc_embs in nested_embeddings for emb in doc_embs]
+
+                else:
+                    # Standard embeddings - flatten all documents
+                    flat_texts = [text for doc in documents for text in doc["texts"]]
+
+                    logging.debug(
+                        f"Standard embed {table}.{column}: "
+                        f"{len(documents)} documents, {len(flat_texts)} chunks"
+                    )
+
+                    embeddings = await self.embedder.embed(flat_texts)
+
+                # Collect all IDs and convert embeddings to numpy
+                all_ids = [row_id for doc in documents for row_id in doc["ids"]]
+                vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
+
+                if len(vectors) != len(all_ids):
+                    raise ValueError(
+                        f"Embedding count mismatch: got {len(vectors)} embeddings "
+                        f"for {len(all_ids)} IDs in {table}.{column}"
+                    )
+
+                # Write to vector store
                 vs = self.get_or_create_vector_store(table, column)
                 with self._lock:
-                    vs.add_batch(ids, vectors)
+                    vs.add_batch(all_ids, vectors)
+
             except Exception as e:
-                logging.error(f"Vector store write failed for {table}.{column}: {e}")
-                indices = group_indices.get((table, column), [])
-                texts = [flat_texts[i] for i in indices]
-                failed_groups.append((table, column, ids, texts))
+                logging.error(f"Embedding failed for {table}.{column}: {e}")
+                # Collect texts for outbox (flattened)
+                all_ids = [row_id for doc in documents for row_id in doc["ids"]]
+                all_texts = [text for doc in documents for text in doc["texts"]]
+                failed_groups.append((table, column, all_ids, all_texts))
 
         return failed_groups
 
@@ -535,8 +477,7 @@ class Database:
         for (table, column), payload in grouped.items():
             try:
                 logging.debug(f"Retrying {len(payload['texts'])} embeddings for ({table}, {column})")
-                import asyncio as _asyncio
-                embeddings = await _asyncio.shield(self.embedder.embed(payload["texts"]))
+                embeddings = await self.embedder.embed(payload["texts"])
                 vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
                 vector_store = self.get_or_create_vector_store(table, column)
@@ -560,19 +501,22 @@ class Database:
             logging.info(f"Removed {len(succeeded_outbox_ids)}/{len(rows)} processed items from vector_outbox")
 
     def _enqueue_embedding(self, table: str, column: str, ids: List, texts: List):
-        """Enqueue embeddings for batch processing on transaction commit.
+        """Enqueue embeddings for batch processing.
 
-        Called by UpsertBuilder when inside a transaction context.
+        Each call represents ONE document's worth of chunks. Document boundaries
+        are preserved for contextualized embeddings.
+
+        Called by UpsertBuilder when inside batch_embeddings() context.
+        If not inside context, embeddings should be generated immediately instead.
 
         Args:
             table: Table name
             column: Column name (vector field)
-            ids: List of row IDs
-            texts: List of texts to embed
+            ids: List of row IDs for this document
+            texts: List of texts to embed for this document
 
         Raises:
-            RuntimeError: If not inside a transaction
-            DatabaseError: If embedder is None (can't process vector fields)
+            DatabaseError: If embedder is None or wrong task context
             ValueError: If ids and texts lengths don't match
         """
         # Validate inputs
@@ -584,25 +528,25 @@ class Database:
 
         if not self.embedder:
             raise DatabaseError(
-                f"Cannot enqueue embeddings for {table}.{column} without an embedder. "
+                f"Cannot enqueue embeddings for {table}.{column} without embedder. "
                 "Set VOYAGE_API_KEY environment variable."
             )
 
         queue = emb_queue_var.get()
         if queue is None:
+            # Not inside batch_embeddings() context
+            # This is a programming error - caller should check and embed immediately
             raise RuntimeError(
-                "No embedding queue bound. _enqueue_embedding() should only be called "
-                "inside a transaction context."
+                f"Cannot enqueue embeddings for {table}.{column} outside batch_embeddings() context. "
+                f"Either use 'async with db.batch_embeddings():' or generate embeddings immediately."
             )
 
+        # Append this document (preserves document boundaries)
         key = (table, column)
-        slot = queue.get(key)
-        if slot is None:
-            slot = {"ids": [], "texts": []}
-            queue[key] = slot
+        if key not in queue:
+            queue[key] = []
 
-        slot["ids"].extend(ids)
-        slot["texts"].extend(texts)
+        queue[key].append({"ids": ids, "texts": texts})
 
     def table(self, name: str) -> "TableQueryBuilder":
         """Return a query builder bound to a table or view."""
@@ -690,9 +634,12 @@ class Database:
         Includes optional slow-query logging controlled by INTELLIFIN_SLOW_SQL_MS (default 2000ms).
         """
         import time
+        import os
         t0 = time.time()
         with self._lock:
             rows = self._exec_unsafe(sql, params)
+            # Commit after successful execution (SQLite is NOT in autocommit mode by default)
+            self.conn.commit()
         elapsed_ms = (time.time() - t0) * 1000.0
         try:
             threshold = int(os.environ.get("INTELLIFIN_SLOW_SQL_MS", "2000"))

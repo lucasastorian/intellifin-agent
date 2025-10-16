@@ -4,58 +4,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
-from pydantic import BaseModel
 
 from agent.agent import Agent
 from agent.clients.base_client import BaseClient
 from agent.utils.pricing import calculate_cost
 from evals.eval_dataset import EvalDataset, Question, EvalMode
 from evals.answer_evaluator import Evaluator
-
-
-class EvalResult(BaseModel):
-    """Result for a single question"""
-    id: str
-    question: str
-    ground_truth: str
-    agent_answer: str
-    correct: bool
-    human_override: str = ""  # Empty means no override yet
-
-    # Performance metrics
-    execution_time_seconds: float
-    cost_usd: float
-    input_tokens: int
-    output_tokens: int
-    num_iter: int
-
-
-class EvalRun(BaseModel):
-    """Complete eval run results"""
-    dataset_name: str
-    eval_mode: str
-    run_timestamp: str
-
-    # Model configuration
-    model: str
-    provider: str  # "openai", "anthropic", or "xai"
-    temperature: float
-    tier: str
-    reasoning_effort: str
-    max_iter: int
-    grader_model: str
-
-    # Results
-    total_questions: int
-    correct_count: int
-    accuracy: float
-    results: List[EvalResult]
-
-    # Performance metrics
-    total_cost_usd: float
-    avg_execution_time_seconds: float
-    total_input_tokens: int
-    total_output_tokens: int
+from evals.eval_models import AgentResult, EvalResult, EvalRun
+from database import Database
 
 
 class EvalRunner:
@@ -82,45 +38,32 @@ class EvalRunner:
         reasoning_effort: str = "low",
         temperature: float = 1.0,
         tier: str = "tier-3",
+        serial: bool = False,
+        verbose: bool = False
     ) -> EvalRun:
-        """
-        Run evaluation on a dataset.
-
-        Args:
-            dataset_path: Path to YAML dataset file
-            output_dir: Directory to save results
-            mode: EvalMode to use
-                - ORIGINAL: As published - no changes
-                - UPDATED: Fix only outdated answers (time-based changes)
-                - STANDARD: Fix outdated + incorrect + structurally_invalid (all corrections) (default)
-                - STRICT: Fix everything + revised Q for ambiguous
-            limit: Limit evaluation to first N questions (None = all questions)
-
-        Returns:
-            EvalRun with all results and metrics
-        """
         dataset = EvalDataset.from_yaml(dataset_path, mode=mode)
 
         questions = dataset.questions[:limit] if limit else dataset.questions
 
-        print(f"📊 Running eval: {dataset.name}")
-        print(f"   Mode: {mode.value.upper()}")
-        print(f"   Questions: {len(questions)}" + (f" (limited from {len(dataset.questions)})" if limit else ""))
+        from schema import schema
+        database = Database(schema=schema, base_path="./data/intellifin.db")
 
-        client_name = self.client.__class__.__name__.lower()
-        if "anthropic" in client_name:
-            provider = "anthropic"
-        elif "xai" in client_name:
-            provider = "xai"
+        if serial:
+            agent_results = await self._run_agent_serial(
+                questions=questions,
+                database=database,
+                skip_sync=True,
+                verbose=verbose
+            )
         else:
-            provider = "openai"
+            agent_results = await self._run_agent_parallel(
+                questions=questions,
+                database=database,
+                skip_sync=True,
+                verbose=verbose
+            )
 
-        print("\n🤖 Running agent on all questions...")
-        agent_results = await self._run_agent_parallel(questions, provider, self.client.model)
-
-        agent_answers = [r["answer"] for r in agent_results]
-
-        print("\n📝 Grading responses...")
+        agent_answers = [r.answer for r in agent_results]
         correctness = await self._grade_parallel(questions, agent_answers)
 
         results = []
@@ -134,22 +77,23 @@ class EvalRunner:
             if is_correct:
                 correct_count += 1
 
-            total_cost += agent_result["cost_usd"]
-            total_execution_time += agent_result["execution_time_seconds"]
-            total_input_tokens += agent_result["input_tokens"]
-            total_output_tokens += agent_result["output_tokens"]
+            total_cost += agent_result.cost_usd
+            total_execution_time += agent_result.execution_time_seconds
+            total_input_tokens += agent_result.input_tokens
+            total_output_tokens += agent_result.output_tokens
 
-            results.append(EvalResult(
+            results.append(
+                EvalResult(
                 id=question.id,
                 question=question.question,
                 ground_truth=question.ground_truth,
-                agent_answer=agent_result["answer"],
+                agent_answer=agent_result.answer,
                 correct=is_correct,
-                execution_time_seconds=agent_result["execution_time_seconds"],
-                cost_usd=agent_result["cost_usd"],
-                input_tokens=agent_result["input_tokens"],
-                output_tokens=agent_result["output_tokens"],
-                num_iter=agent_result["num_iter"]
+                execution_time_seconds=agent_result.execution_time_seconds,
+                cost_usd=agent_result.cost_usd,
+                input_tokens=agent_result.input_tokens,
+                output_tokens=agent_result.output_tokens,
+                num_iter=agent_result.num_iter
             ))
 
         run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -160,7 +104,7 @@ class EvalRunner:
             eval_mode=mode.value,
             run_timestamp=run_timestamp,
             model=self.client.model,
-            provider=provider,
+            provider=self.client.provider,
             temperature=temperature,
             tier=tier,
             reasoning_effort=reasoning_effort,
@@ -182,60 +126,166 @@ class EvalRunner:
         self._save_json(eval_run, run_dir / "results.json")
         self._save_markdown_report(eval_run, run_dir / "report.md")
 
-        print(f"\n✅ Eval complete!")
-        print(f"   Accuracy: {correct_count}/{len(questions)} ({eval_run.accuracy:.1%})")
-        print(f"   Total Cost: ${eval_run.total_cost_usd:.2f}")
-        print(f"   Avg Time: {eval_run.avg_execution_time_seconds:.1f}s per question")
-        print(f"   Results saved to: {run_dir}")
+        # Print final summary
+        if verbose or serial:
+            self._print_final_summary(eval_run)
 
         return eval_run
 
-    async def _run_agent_parallel(self, questions: List[Question], provider: str, model: str) -> List[dict]:
-        """
-        Run agent on all questions in parallel.
+    def _print_final_summary(self, eval_run: EvalRun):
+        """Print a comprehensive summary of the eval run"""
+        print(f"\n{'='*80}")
+        print(f"FINAL EVAL SUMMARY")
+        print(f"{'='*80}\n")
 
-        Returns:
-            List of dicts with keys: answer, execution_time_seconds, cost_usd, input_tokens, output_tokens
-        """
-        async def run_single(question: Question) -> dict:
+        print(f"Dataset: {eval_run.dataset_name}")
+        print(f"Mode: {eval_run.eval_mode.upper()}")
+        print(f"Run Timestamp: {eval_run.run_timestamp}\n")
+
+        print(f"Model Configuration:")
+        print(f"  • Model: {eval_run.model} ({eval_run.provider})")
+        print(f"  • Temperature: {eval_run.temperature}")
+        print(f"  • Reasoning Effort: {eval_run.reasoning_effort}")
+        print(f"  • Max Iterations: {eval_run.max_iter}")
+        print(f"  • Tier: {eval_run.tier}\n")
+
+        print(f"Results:")
+        print(f"  • Accuracy: {eval_run.correct_count}/{eval_run.total_questions} ({eval_run.accuracy:.1%})")
+        print(f"  • Passed: {eval_run.correct_count}")
+        print(f"  • Failed: {eval_run.total_questions - eval_run.correct_count}\n")
+
+        print(f"Performance:")
+        print(f"  • Total Cost: ${eval_run.total_cost_usd:.4f}")
+        print(f"  • Avg Cost per Question: ${eval_run.total_cost_usd / eval_run.total_questions:.4f}")
+        print(f"  • Avg Execution Time: {eval_run.avg_execution_time_seconds:.2f}s")
+        print(f"  • Total Input Tokens: {eval_run.total_input_tokens:,}")
+        print(f"  • Total Output Tokens: {eval_run.total_output_tokens:,}")
+        print(f"  • Total Tokens: {eval_run.total_input_tokens + eval_run.total_output_tokens:,}\n")
+
+        print(f"Grader: {eval_run.grader_model}\n")
+
+        print(f"{'='*80}\n")
+
+    async def _run_agent_serial(
+        self,
+        questions: List[Question],
+        database: Database,
+        skip_sync: bool = False,
+        verbose: bool = False
+    ) -> List[AgentResult]:
+        """Run agent on all questions serially (one at a time) with real-time output."""
+        results = []
+        total_cost = 0.0
+
+        print(f"\n{'='*80}")
+        print(f"SERIAL EVAL: Running {len(questions)} questions one at a time")
+        print(f"{'='*80}\n")
+
+        for i, question in enumerate(questions, 1):
+            print(f"\n{'─'*80}")
+            print(f"[{i}/{len(questions)}] Question: {question.id}")
+            print(f"{'─'*80}")
+            print(f"Q: {question.question}\n")
+
             agent = Agent(
+                database=database,
                 edgar_user_agent=self.edgar_user_agent,
                 client=self.client,
                 max_iter=self.max_iter,
-                verbose=False
+                verbose=verbose,
+                skip_sync=skip_sync
             )
 
-            print(f"   [{question.id}] Running...")
             start_time = time.time()
             result = await agent.run(query=question.question)
             execution_time = time.time() - start_time
 
-            token_usage = agent.get_token_usage()
-            input_tokens = token_usage["total_input_tokens"]
-            cached_input_tokens = token_usage["total_cached_input_tokens"]
-            output_tokens = token_usage["total_output_tokens"] + token_usage["total_thinking_tokens"]
+            uncached_input_tokens = agent.usage.uncached_prompt_tokens
+            cached_input_tokens = agent.usage.cached_prompt_tokens
+            output_tokens = agent.usage.completion_tokens + agent.usage.thinking_tokens
 
-            # Calculate cost
             cost = calculate_cost(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                uncached_input_tokens=uncached_input_tokens,
                 cached_input_tokens=cached_input_tokens,
-                provider=provider,
-                model=model
+                output_tokens=output_tokens,
+                model=self.client.model,
+                provider=self.client.provider
             )
 
-            print(f"   [{question.id}] ✓ Complete ({execution_time:.1f}s, ${cost:.4f})")
+            total_cost += cost
 
-            return {
-                "answer": result or "No response",
-                "execution_time_seconds": execution_time,
-                "cost_usd": cost,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "num_iter": agent.num_iter
-            }
+            agent_result = AgentResult(
+                answer=result or "No response",
+                execution_time_seconds=execution_time,
+                cost_usd=cost,
+                input_tokens=agent.usage.input_tokens,
+                output_tokens=output_tokens,
+                num_iter=agent.num_iter
+            )
+
+            results.append(agent_result)
+
+            # Print summary for this question
+            print(f"\n{'─'*80}")
+            print(f"✓ Completed [{i}/{len(questions)}]")
+            print(f"Answer: {result}")
+            print(f"Time: {execution_time:.2f}s | Cost: ${cost:.4f} | Tokens: {agent.usage.input_tokens:,} in / {output_tokens:,} out | Iterations: {agent.num_iter}")
+            print(f"Running Total Cost: ${total_cost:.4f}")
+            print(f"{'─'*80}\n")
+
+        print(f"\n{'='*80}")
+        print(f"SERIAL EVAL COMPLETE")
+        print(f"Total Questions: {len(questions)}")
+        print(f"Total Cost: ${total_cost:.4f}")
+        print(f"{'='*80}\n")
+
+        return results
+
+    async def _run_agent_parallel(
+        self,
+        questions: List[Question],
+        database: Database,
+        skip_sync: bool = False,
+        verbose: bool = False
+    ) -> List[AgentResult]:
+        """Run agent on all questions in parallel."""
+        async def run_single(question: Question) -> AgentResult:
+            agent = Agent(
+                database=database,
+                edgar_user_agent=self.edgar_user_agent,
+                client=self.client,
+                max_iter=self.max_iter,
+                verbose=verbose,
+                skip_sync=skip_sync
+            )
+
+            start_time = time.time()
+            result = await agent.run(query=question.question)
+            execution_time = time.time() - start_time
+
+            uncached_input_tokens = agent.usage.uncached_prompt_tokens
+            cached_input_tokens = agent.usage.cached_prompt_tokens
+            output_tokens = agent.usage.completion_tokens + agent.usage.thinking_tokens
+
+            cost = calculate_cost(
+                uncached_input_tokens=uncached_input_tokens,
+                cached_input_tokens=cached_input_tokens,
+                output_tokens=output_tokens,
+                model=self.client.model,
+                provider=self.client.provider
+            )
+
+            return AgentResult(
+                answer=result or "No response",
+                execution_time_seconds=execution_time,
+                cost_usd=cost,
+                input_tokens=agent.usage.input_tokens,
+                output_tokens=output_tokens,
+                num_iter=agent.num_iter
+            )
 
         results = await asyncio.gather(*[run_single(q) for q in questions])
+
         return results
 
     async def _grade_parallel(
@@ -245,14 +295,11 @@ class EvalRunner:
     ) -> List[bool]:
         """Grade all answers in parallel"""
         async def grade_single(question: Question, answer: str) -> bool:
-            print(f"   [{question.id}] Grading...")
             is_correct = await self.evaluator.evaluate(
                 question=question.question,
                 provided_answer=answer,
                 actual_answer=question.ground_truth
             )
-            status = "✓" if is_correct else "✗"
-            print(f"   [{question.id}] {status}")
             return is_correct
 
         grades = await asyncio.gather(*[

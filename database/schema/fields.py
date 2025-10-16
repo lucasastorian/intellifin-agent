@@ -150,10 +150,15 @@ class Serial(FieldDescriptor):
 
 
 class Text(FieldDescriptor):
-    def __init__(self, index: bool = False, fts: bool = False, vector: bool = False, **kwargs):
+    def __init__(self, index: bool = False, fts: bool = False, vector: bool = False, contextualized: bool = False, **kwargs):
         super().__init__("TEXT", index=index, **kwargs)
         self.fts = fts
         self.vector = vector
+        self.contextualized = contextualized
+
+        # Validate: contextualized requires vector=True
+        if contextualized and not vector:
+            raise ValueError("contextualized=True requires vector=True")
 
     def _validate_type(self, value: Any) -> str:
         """Validate and convert value to string"""
@@ -164,6 +169,7 @@ class Text(FieldDescriptor):
         data = super().to_dict()
         data['fts'] = self.fts
         data['vector'] = self.vector
+        data['contextualized'] = self.contextualized
         return data
 
     @classmethod
@@ -173,6 +179,7 @@ class Text(FieldDescriptor):
             index=data['index'],
             fts=data.get('fts', False),
             vector=data.get('vector', False),
+            contextualized=data.get('contextualized', False),
             primary_key=data['primary_key'],
             nullable=data['nullable'],
             default=data['default'],

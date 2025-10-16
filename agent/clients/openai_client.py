@@ -123,13 +123,17 @@ class OpenAIClient(BaseClient):
 
             elif event.type == 'response.function_call_arguments.delta':
                 self.tool_call_arguments += event.delta
-                body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
-                                      partial_mode="trailing-strings")
+                try:
+                    body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
+                                          partial_mode="trailing-strings")
 
-                if type(body_json) is not dict:
+                    if type(body_json) is not dict:
+                        continue
+
+                    completion.actions[-1].body = body_json
+
+                except ValueError:
                     continue
-
-                completion.actions[-1].body = body_json
 
             elif event.type == 'response.function_call_arguments.done':
                 completion.actions[-1].status = 'parsed'

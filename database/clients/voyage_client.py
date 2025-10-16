@@ -44,6 +44,12 @@ class VoyageClient:
         result = await self._embed(texts=[text], input_type="query")
         return result[0]
 
+    async def contextual_query_vector(self, text: str) -> List[float]:
+        """Generates a contextual query vector"""
+        result = await self._contextualized_embed(inputs=[[text]], model="voyage-context-3",
+                                                  input_type="query", output_dimension=self.dimensions)
+        return result[0][0]
+
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generates a flat list of embeddings for all texts."""
         if not self.cache:
@@ -66,10 +72,8 @@ class VoyageClient:
             logging.debug(f"Cache miss: {len(uncached_texts)}/{len(texts)} texts")
             new_embeddings = []
             for batch in await self._batch_texts(texts=uncached_texts):
-                print(f"Embedding batch at of {len(batch)} embeddings")
                 batch_embeddings = await self._embed(batch, input_type="document")
                 new_embeddings.extend(batch_embeddings)
-                print(f"Completed embedding {len(batch)} embeddings")
 
             self.cache.set_many(uncached_texts, new_embeddings)
 
@@ -216,37 +220,115 @@ class VoyageClient:
     #     ))
     # )
     async def contextualized_embed(self, inputs: List[List[str]], model: str = "voyage-context-3",
-                                   input_type: Optional[str] = None, output_dimension: Optional[int] = 1024,
-                                   truncation: bool = True) -> List[List[List[float]]]:
-        """Generate contextualized embeddings using voyage-context-3 model."""
+                                   input_type: str = "document", output_dimension: int = 512) -> List[
+        List[float]]:
+        """Generate contextualized embeddings using voyage-context-3 model.
+
+        Returns nested list of embeddings (one inner list per document).
+        Each inner list (document) is cached independently.
+
+        Args:
+            inputs: List of documents, where each document is a list of chunk texts
+            model: Contextualized embedding model to use
+            input_type: "document" or "query" (optional)
+            output_dimension: Embedding dimension
+
+        Returns:
+            Nested list of embeddings: List[List[float]] where each inner list
+            contains embeddings for one document's chunks
+        """
         if not inputs:
             return []
 
-        if len(inputs) > 128:
-            raise ValueError(f"voyage-context-3 supports max 128 documents, got {len(inputs)}")
+        if len(inputs) > 1000:
+            raise ValueError(f"voyage-context-3 supports max 1000 documents, got {len(inputs)}")
 
         for i, doc_chunks in enumerate(inputs):
-            if len(doc_chunks) > 50:
+            if len(doc_chunks) > 1000:
                 raise ValueError(
                     f"Document {i} has {len(doc_chunks)} chunks. "
-                    f"voyage-context-3 supports max 50 chunks per document."
+                    f"voyage-context-3 supports max 1000 chunks per document."
                 )
 
-        logging.debug(f"Contextualized embedding: {len(inputs)} documents, "
+        if not self.cache:
+            response = await self._contextualized_embed(inputs, model, input_type, output_dimension)
+            return response
+
+        # Check cache for each document (per-document caching)
+        cached_results, uncached_inputs, uncached_indices = self._check_contextualized_cache(inputs)
+
+        # Embed uncached documents in batch
+        if uncached_inputs:
+            logging.debug(f"Contextualized cache miss: {len(uncached_inputs)}/{len(inputs)} documents")
+
+            new_embeddings = await self._contextualized_embed(
+                uncached_inputs, model, input_type, output_dimension
+            )
+
+            # Store results and insert into cached_results
+            self._store_contextualized_cache(uncached_inputs, uncached_indices, new_embeddings, cached_results)
+        else:
+            logging.debug(f"Contextualized cache hit: {len(inputs)}/{len(inputs)} documents")
+
+        return cached_results
+
+    @staticmethod
+    def _compute_document_cache_key(document: List[str]) -> str:
+        """Compute cache key for a single document (list of chunk texts)."""
+        import hashlib
+        import json
+
+        canonical = json.dumps(document, sort_keys=True)
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def _check_contextualized_cache(self, inputs: List[List[str]]) -> tuple:
+        """Check cache for each document independently."""
+        cached_results = []
+        uncached_inputs = []
+        uncached_indices = []
+
+        for i, document in enumerate(inputs):
+            cache_key = self._compute_document_cache_key(document)
+            cached_embeddings = self.cache.get(cache_key)
+
+            if cached_embeddings is None:
+                # Cache miss - need to embed this document
+                uncached_inputs.append(document)
+                uncached_indices.append(i)
+                cached_results.append(None)  # Placeholder
+            else:
+                # Cache hit - use cached embeddings
+                cached_results.append(cached_embeddings)
+
+        return cached_results, uncached_inputs, uncached_indices
+
+    def _store_contextualized_cache(self, documents: List[List[str]], indices: List[int],
+                                    embeddings: List[List[float]], results: List) -> None:
+        """Store newly generated embeddings to cache and insert into results."""
+        for document, idx, doc_embeddings in zip(documents, indices, embeddings):
+            cache_key = self._compute_document_cache_key(document)
+            self.cache.set(cache_key, doc_embeddings)
+            results[idx] = doc_embeddings
+
+    async def _contextualized_embed(self, inputs: List[List[str]], model: str,
+                                    input_type: str = "document", output_dimension: int = 512) -> List[
+        List[List[float]]]:
+        """Make Voyage API call for contextualized embeddings.
+        """
+        logging.debug(f"Contextualized API call: {len(inputs)} documents, "
                       f"{sum(len(doc) for doc in inputs)} total chunks")
 
         try:
             async with self.request_rate_limiter.context():
-                response = await self.client.embed(
-                    texts=inputs,
+                response = await self.client.contextualized_embed(
+                    inputs=inputs,
                     model=model,
                     input_type=input_type,
                     output_dimension=output_dimension,
-                    truncation=truncation
                 )
 
-            # WRONG?!??!?!
-            return [doc_embeddings for doc_embeddings in response.embeddings]
+            # Return nested structure (one list per document)
+            return [[embedding for embedding in doc_result.embeddings] for doc_result in response.results]
 
         except voyageai.error.RateLimitError as e:
             logging.warning(f"Voyage contextualized embed API rate limit hit: {e}")

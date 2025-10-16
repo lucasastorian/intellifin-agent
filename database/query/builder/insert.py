@@ -57,6 +57,8 @@ class InsertBuilder:
                 sql = f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) VALUES ({', '.join(['?'] * num_cols)})"
                 param_rows = [[row[c] for c in cols] for row in serialized_rows]
                 self.db.conn.executemany(sql, param_rows)
+                # Commit after executemany (SQLite is NOT in autocommit mode)
+                self.db.conn.commit()
                 all_results = None  # Signal executemany was used
             else:
                 batch_size = max(1, max_vars // num_cols)

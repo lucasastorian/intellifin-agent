@@ -57,7 +57,20 @@ PRICING = {
             "output_per_million": 3,
             "cached_input_per_million": 50
         }
+    },
+    "Google": {
+        "gemini-2.5-flash": {
+            "input_per_million": 0.30,
+            "output_per_million": 2.50,
+            "cached_input_per_million": 0.30
+        },
+        "gemini-2.5-pro": {
+            "input_per_million": 1.25,
+            "output_per_million": 10,
+            "cached_input_per_million": 1.25
+        }
     }
+
 }
 
 

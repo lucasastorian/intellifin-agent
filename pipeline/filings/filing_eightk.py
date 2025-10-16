@@ -22,11 +22,9 @@ class FilingEightK(BaseFiling):
         filing = await self._upsert_filing(xbrl=xbrl)
         pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        # Use transaction to batch all embeddings from chunks/attachments
-        async with self.database.transaction():
-            # NOTE: chunking filing + press release missing here !
-            await self._upsert_filing_chunks(pages=pages, filing=filing)
-            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        # NOTE: chunking filing + press release missing here !
+        await self._upsert_filing_chunks(pages=pages, filing=filing)
+        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata update + sync complete
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

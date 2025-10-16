@@ -37,6 +37,7 @@ class GeminiClient(ChatCompletionsOpenAIClient):
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
                      allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
         """Streams a completion with the given messages"""
+        # GEMINI doesn't include usage when streaming, so we've disabled it.
         messages = [{"role": "system", "content": system_prompt}] + [message.legacy_openai_format() for message in
                                                                      messages]
 
@@ -45,12 +46,13 @@ class GeminiClient(ChatCompletionsOpenAIClient):
             "temperature": self.temperature,
             "messages": messages,
             "tools": [action.openai_legacy_schema for action in actions],
-            "stream": True,
             "extra_body": {
-                "google": {
-                    "thinking_config": {
-                        "thinking_budget": self.reasoning_budget,
-                        "include_thoughts": True
+                "extra_body": {
+                    "google": {
+                        "thinking_config": {
+                            "thinking_budget": self.reasoning_budget,
+                            "include_thoughts": True
+                        }
                     }
                 }
             }
@@ -61,4 +63,4 @@ class GeminiClient(ChatCompletionsOpenAIClient):
             params['tool_choice'] = "required"
 
         response = await self.client.chat.completions.create(**params)
-        return await self.stream_completion(response=response)
+        return self._convert_response_to_message(response=response)

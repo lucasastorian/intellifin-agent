@@ -175,7 +175,7 @@ class SearchFilingNotesAction(BaseAction):
 
             result = await query.vector_search(
                 args.excerpt_description,
-                "embedding",  # Vector search on embedding field (has header context)
+                "embedding",
                 topk=limit,
                 return_scores=True
             ).execute()

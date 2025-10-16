@@ -18,6 +18,7 @@ class TableMeta(type):
 
 
 class Table(metaclass=TableMeta):
+
     __tablename__: str = ""
     __uniques__: tuple = ()  # Immutable default; list of tuples for composite UNIQUE constraints
 

@@ -167,104 +167,91 @@ class UpsertBuilder:
         async def _exec_upsert():
             all_results = []
 
-            # Only wrap in transaction if not already inside one
-            # This prevents nested transaction issues and allows batching
-            ctx_owns_txn = not self.db.in_transaction()
+            if use_select_insert:
+                # Generate SELECT-based INSERT to pull missing NOT NULL fields from existing row
+                # This avoids validation errors when doing PK-based partial updates
+                pk_col = self.on_conflict_cols[0]  # Assuming single PK for now
+                all_cols = cols + list(missing_required)
 
-            if ctx_owns_txn:
-                cm = self.db.transaction()
-            else:
-                # No-op async context manager - already in transaction
-                from contextlib import asynccontextmanager
-                @asynccontextmanager
-                async def noop():
-                    yield
-                cm = noop()
+                for row in serialized_rows:
+                    # Build SELECT clause
+                    select_parts = []
+                    params = []
 
-            async with cm:
-                if use_select_insert:
-                    # Generate SELECT-based INSERT to pull missing NOT NULL fields from existing row
-                    # This avoids validation errors when doing PK-based partial updates
-                    pk_col = self.on_conflict_cols[0]  # Assuming single PK for now
-                    all_cols = cols + list(missing_required)
+                    for col in all_cols:
+                        if col in cols:
+                            # Provided field - use parameter
+                            select_parts.append("?")
+                            params.append(row[col])
+                        else:
+                            # Missing required field - pull from existing row
+                            select_parts.append(self.dialect.q(col))
 
-                    for row in serialized_rows:
-                        # Build SELECT clause
-                        select_parts = []
-                        params = []
+                    # Add PK value for WHERE clause
+                    params.append(row[pk_col])
 
-                        for col in all_cols:
-                            if col in cols:
-                                # Provided field - use parameter
-                                select_parts.append("?")
-                                params.append(row[col])
-                            else:
-                                # Missing required field - pull from existing row
-                                select_parts.append(self.dialect.q(col))
-
-                        # Add PK value for WHERE clause
-                        params.append(row[pk_col])
-
-                        # Build UPDATE clause
-                        update_clauses = [
-                            f"{self.dialect.q(c)} = excluded.{self.dialect.q(c)}"
-                            for c in cols if c != pk_col
-                        ]
-                        action = f"DO UPDATE SET {', '.join(update_clauses)}" if update_clauses else "DO NOTHING"
-
-                        sql = (
-                            f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in all_cols)}) "
-                            f"SELECT {', '.join(select_parts)} "
-                            f"FROM {self.dialect.q(self.table)} "
-                            f"WHERE {self.dialect.q(pk_col)} = ? "
-                            f"ON CONFLICT ({self.dialect.q(pk_col)}) {action}"
-                        )
-
-                        if self.returning_all:
-                            sql += f" RETURNING *"
-
-                        rows = await self.db._exec(sql, params)
-                        for r in rows:
-                            r = self.db._deserialize_json_fields(self.table, r)
-                            all_results.append(r)
-
-                elif use_executemany:
-                    conflict_cols = ", ".join(self.dialect.q(c) for c in self.on_conflict_cols)
-                    if self.do_nothing:
-                        action = "DO NOTHING"
-                    else:
-                        update_clauses = [
-                            f"{self.dialect.q(c)} = excluded.{self.dialect.q(c)}"
-                            for c in cols if c not in self.on_conflict_cols
-                        ]
-                        action = f"DO UPDATE SET {', '.join(update_clauses)}" if update_clauses else "DO NOTHING"
+                    # Build UPDATE clause
+                    update_clauses = [
+                        f"{self.dialect.q(c)} = excluded.{self.dialect.q(c)}"
+                        for c in cols if c != pk_col
+                    ]
+                    action = f"DO UPDATE SET {', '.join(update_clauses)}" if update_clauses else "DO NOTHING"
 
                     sql = (
-                        f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) "
-                        f"VALUES ({', '.join(['?'] * num_cols)}) "
-                        f"ON CONFLICT ({conflict_cols}) {action}"
+                        f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in all_cols)}) "
+                        f"SELECT {', '.join(select_parts)} "
+                        f"FROM {self.dialect.q(self.table)} "
+                        f"WHERE {self.dialect.q(pk_col)} = ? "
+                        f"ON CONFLICT ({self.dialect.q(pk_col)}) {action}"
                     )
-                    param_rows = [[row[c] for c in cols] for row in serialized_rows]
-                    with self.db._lock:
-                        self.db.conn.executemany(sql, param_rows)
-                    return None  # Signal executemany was used
-                else:
-                    batch_size = max(1, max_vars // num_cols)
-                    for i in range(0, len(serialized_rows), batch_size):
-                        batch = serialized_rows[i:i + batch_size]
-                        ir = UpsertIR(
-                            table=self.table,
-                            rows=batch,
-                            on_conflict=self.on_conflict_cols,
-                            do_nothing=self.do_nothing,
-                            returning_all=self.returning_all,
-                        )
-                        sql, params = generate_upsert(ir, self.dialect)
-                        rows = await self.db._exec(sql, params)
 
-                        for row in rows:
-                            row = self.db._deserialize_json_fields(self.table, row)
-                            all_results.append(row)
+                    if self.returning_all:
+                        sql += f" RETURNING *"
+
+                    rows = await self.db._exec(sql, params)
+                    for r in rows:
+                        r = self.db._deserialize_json_fields(self.table, r)
+                        all_results.append(r)
+
+            elif use_executemany:
+                conflict_cols = ", ".join(self.dialect.q(c) for c in self.on_conflict_cols)
+                if self.do_nothing:
+                    action = "DO NOTHING"
+                else:
+                    update_clauses = [
+                        f"{self.dialect.q(c)} = excluded.{self.dialect.q(c)}"
+                        for c in cols if c not in self.on_conflict_cols
+                    ]
+                    action = f"DO UPDATE SET {', '.join(update_clauses)}" if update_clauses else "DO NOTHING"
+
+                sql = (
+                    f"INSERT INTO {self.dialect.q(self.table)} ({', '.join(self.dialect.q(c) for c in cols)}) "
+                    f"VALUES ({', '.join(['?'] * num_cols)}) "
+                    f"ON CONFLICT ({conflict_cols}) {action}"
+                )
+                param_rows = [[row[c] for c in cols] for row in serialized_rows]
+                with self.db._lock:
+                    self.db.conn.executemany(sql, param_rows)
+                    # Commit after executemany (SQLite is NOT in autocommit mode)
+                    self.db.conn.commit()
+                return None  # Signal executemany was used
+            else:
+                batch_size = max(1, max_vars // num_cols)
+                for i in range(0, len(serialized_rows), batch_size):
+                    batch = serialized_rows[i:i + batch_size]
+                    ir = UpsertIR(
+                        table=self.table,
+                        rows=batch,
+                        on_conflict=self.on_conflict_cols,
+                        do_nothing=self.do_nothing,
+                        returning_all=self.returning_all,
+                    )
+                    sql, params = generate_upsert(ir, self.dialect)
+                    rows = await self.db._exec(sql, params)
+
+                    for row in rows:
+                        row = self.db._deserialize_json_fields(self.table, row)
+                        all_results.append(row)
             return all_results
 
         all_results = await _exec_upsert()
@@ -279,9 +266,9 @@ class UpsertBuilder:
         return Result(all_results)
 
     async def _embed_vectors(self, rows: List[Dict[str, Any]]):
-        """Embed and store vectors - queue if in transaction, immediate otherwise.
+        """Embed and store vectors - queue if in batch_embeddings() context, immediate otherwise.
 
-        If inside a transaction context, embeddings are queued and batched on commit.
+        If inside batch_embeddings() context, embeddings are queued and flushed at context exit.
         Otherwise, embeddings are generated immediately (backwards compatible behavior).
         """
         if not rows or not self.db.embedder:
@@ -305,7 +292,10 @@ class UpsertBuilder:
         if not vector_fields:
             return
 
-        in_txn = self.db.in_transaction()
+        # Check if we're inside batch_embeddings() context
+        from ...context import emb_queue_var
+        queue = emb_queue_var.get()
+        in_batch_context = queue is not None
 
         # Process each vector field
         for field_name in vector_fields:
@@ -320,13 +310,12 @@ class UpsertBuilder:
             if not texts:
                 continue
 
-            if in_txn:
-                # Queue for batch embedding on transaction commit
+            if in_batch_context:
+                # Queue for batch embedding at context exit
                 self.db._enqueue_embedding(self.table, field_name, ids, texts)
             else:
                 # Backwards compatible: embed immediately
-                import asyncio as _asyncio
-                embeddings = await _asyncio.shield(self.db.embedder.embed(texts))
+                embeddings = await self.db.embedder.embed(texts)
                 vectors = [np.array(emb, dtype=np.float32) for emb in embeddings]
 
                 vector_store = self.db.get_or_create_vector_store(self.table, field_name)

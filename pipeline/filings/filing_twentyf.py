@@ -26,18 +26,16 @@ class FilingTwentyF(BaseFiling):
         # Financial statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
-        # Use transaction to batch all embeddings from chunks/notes/attachments
-        async with self.database.transaction():
-            # Core filing sections & section chunks
-            sections = await self._upsert_filing_section_pages(pages=pages, filing_id=filing['id'])
-            await self._upsert_filing_section_chunks(sections=sections, filing=filing)
+        # Core filing sections & section chunks
+        sections = await self._upsert_filing_section_pages(pages=pages, filing_id=filing['id'])
+        await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
-            # Filing notes and filing note chunks
-            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        # Filing notes and filing note chunks
+        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
-            # TODO: Attachments / press release??
-            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        # TODO: Attachments / press release??
+        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
                                          filing_id=filing['id'])
@@ -105,14 +103,14 @@ class FilingTwentyF(BaseFiling):
         return sections
 
     async def _upsert_filing_section_chunks(self, sections: List[dict], filing: dict):
-        """Chunks the filing pages and upserts them"""
+        """Upserts chunks for each filing section separately for contextualized embeddings"""
         fiscal_year = filing.get('fiscal_year')
         fiscal_period = filing.get('fiscal_period')
 
         generator = SectionEmbeddingGenerator(self.company, filing=filing, chunk_size=1024, chunk_overlap=0)
 
-        all_chunks = []
-
+        # Upsert each section's chunks separately to preserve document boundaries
+        # for contextualized embeddings (voyage-context-3 compatibility)
         for section in sections:
             section_item = section['item']
 
@@ -132,8 +130,9 @@ class FilingTwentyF(BaseFiling):
 
             chunks = await generator.embed(section_type, section['pages'], fiscal_year, fiscal_period)
 
+            section_chunks = []
             for i, chunk in enumerate(chunks):
-                all_chunks.append({
+                section_chunks.append({
                     "index": i,
                     "section": section_type,
                     "page": chunk.page,
@@ -144,6 +143,6 @@ class FilingTwentyF(BaseFiling):
                     "company_id": self.company_id
                 })
 
-        if all_chunks:
-            await self.database.table("filing_section_chunks").upsert(all_chunks,
-                                                                      on_conflict="filing_id,section,index").execute()
+            if section_chunks:
+                await self.database.table("filing_section_chunks").upsert(section_chunks,
+                                                                          on_conflict="filing_id,section,index").execute()

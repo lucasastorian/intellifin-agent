@@ -26,18 +26,16 @@ class FilingTenK(BaseFiling):
         # Financial Statements
         await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
-        # Use transaction to batch all embeddings from chunks/notes/attachments
-        async with self.database.transaction():
-            # Core filing sections + section chunks
-            sections = await self._upsert_filing_section_pages(pages=pages, filing=filing, filing_type='10-K')
-            await self._upsert_filing_section_chunks(sections=sections, filing=filing)
+        # Core filing sections + section chunks
+        sections = await self._upsert_filing_section_pages(pages=pages, filing=filing, filing_type='10-K')
+        await self._upsert_filing_section_chunks(sections=sections, filing=filing)
 
-            # Filing notes and note chunks
-            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+        # Filing notes and note chunks
+        note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+        await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
-            # Attachments and attachment chunks
-            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+        # Attachments and attachment chunks
+        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata updates + mark filing as synced
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),
@@ -57,7 +55,8 @@ class FilingTenK(BaseFiling):
             "filing_date": self.filing_date,
             "report_date": self.report_date,
             "accession_number": self.accession_number,
-            "company_id": self.company_id
+            "company_id": self.company_id,
+            "synced": False  # Explicitly set to False, mark True only when fully complete
         }, on_conflict="accession_number").execute()
 
         return response.data[0]
@@ -117,13 +116,14 @@ class FilingTenK(BaseFiling):
         return sections
 
     async def _upsert_filing_section_chunks(self, sections: List[dict], filing: dict):
-        """Upserts chunks for each filing section"""
+        """Upserts chunks for each filing section separately for contextualized embeddings"""
         fiscal_year = filing.get('fiscal_year')
         fiscal_period = filing.get('fiscal_period')
 
         generator = SectionEmbeddingGenerator(self.company, filing, chunk_size=1024, chunk_overlap=0)
 
-        all_chunks = []
+        # Upsert each section's chunks separately to preserve document boundaries
+        # for contextualized embeddings (voyage-context-3 compatibility)
         for section in sections:
             if section['item'] in ['ITEM 1', 'ITEM 1A', 'ITEM 2', 'ITEM 3', 'ITEM 5', 'ITEM 6', 'ITEM 7',
                                    'ITEM 7A', 'ITEM 9A', 'ITEM 9B']:
@@ -146,8 +146,9 @@ class FilingTenK(BaseFiling):
                 chunks = await generator.embed(section_type, section['pages'], fiscal_year=fiscal_year,
                                                fiscal_period=fiscal_period)
 
+                section_chunks = []
                 for i, chunk in enumerate(chunks):
-                    all_chunks.append({
+                    section_chunks.append({
                         "index": i,
                         "section": section_type,
                         "page": chunk.page,
@@ -158,6 +159,6 @@ class FilingTenK(BaseFiling):
                         "company_id": self.company_id
                     })
 
-        if all_chunks:
-            await self.database.table("filing_section_chunks").upsert(all_chunks,
-                                                                      on_conflict="filing_id,section,index").execute()
+                if section_chunks:
+                    await self.database.table("filing_section_chunks").upsert(section_chunks,
+                                                                              on_conflict="filing_id,section,index").execute()

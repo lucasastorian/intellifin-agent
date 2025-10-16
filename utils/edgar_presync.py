@@ -11,7 +11,7 @@ async def presync_tickers(
     tickers: List[str],
     database: Database,
     edgar_user_agent: str,
-    start_year: int = 2017,
+    start_year: int = 2018,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
@@ -21,7 +21,7 @@ async def presync_tickers(
         tickers: List of ticker symbols to sync
         database: Database instance
         edgar_user_agent: EDGAR user agent string
-        start_year: Start year for syncing (default: 2017)
+        start_year: Start year for syncing (default: 2018)
         start_date: Optional start date filter (ISO format)
         end_date: Optional end date filter (ISO format)
     """
