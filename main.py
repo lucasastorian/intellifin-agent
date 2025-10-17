@@ -44,7 +44,7 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
         edgar_user_agent=user_agent,
         client=client,
         max_iter=max_iter,
-        skip_sync=not run_presync,
+        skip_sync=False
     )
 
     asyncio.run(agent.run(query=query))
@@ -73,12 +73,12 @@ if __name__ == '__main__':
     parser.add_argument('--reasoning-effort', type=str, default='high',
                         choices=['minimal', 'low', 'medium', 'high'],
                         help='Reasoning effort level (default: medium)')
-    parser.add_argument('--presync', action='store_true', default=False,
-                        help='Presync filings from EDGAR (for benchmarking pre-synced databases)')
-    parser.add_argument('--tickers', type=str,
-                        help='Syncs the ticker symbols for fast access / more accurate benchmarks')
+    # parser.add_argument('--presync', action='store_true', default=False,
+    #                     help='Presync filings from EDGAR (for benchmarking pre-synced databases)')
+    # parser.add_argument('--tickers', type=str,
+    #                     help='Syncs the ticker symbols for fast access / more accurate benchmarks')
 
     args = parser.parse_args()
 
     run_agent(query=args.query, user_agent=args.user_agent, model=args.model, max_iter=args.max_iter,
-              reasoning_effort=args.reasoning_effort, run_presync=args.presync, tickers=args.tickers)
+              reasoning_effort=args.reasoning_effort, run_presync=False, tickers=None)
