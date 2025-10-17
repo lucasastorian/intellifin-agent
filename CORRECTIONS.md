@@ -394,25 +394,7 @@ By late 2024, both categories showed renewed growth, contradicting the original 
 
 ---
 
-## 7. Methodology
-
-All corrections follow this protocol:
-
-1. **Identify discrepancy** between agent output and benchmark answer
-2. **Retrieve primary source** (SEC filing, earnings transcript, press release)
-3. **Verify facts** against original documents
-4. **Document correction** in YAML with:
-   - `issue_type` classification
-   - `issue_notes` with detailed explanation
-   - `revision_date`
-   - SEC filing URL where applicable
-   - Both `original_ground_truth` and corrected `ground_truth`
-
-5. **Preserve original** for comparison and auditability
-
----
-
-## 8. Impact on Benchmark Validity
+## 7. Impact on Benchmark Validity
 
 These corrections transform the Finance Agent benchmark from a **tolerance test for bad ground truth** into an **actual test of agent accuracy**.
 
@@ -428,7 +410,7 @@ These corrections transform the Finance Agent benchmark from a **tolerance test 
 
 ---
 
-## 9. Reproducibility
+## 8. Reproducibility
 
 Every correction can be independently verified:
 
@@ -447,7 +429,7 @@ All SEC filing citations are direct links to EDGAR archives.
 
 ---
 
-## 10. Contact
+## 9. Contact
 
 Questions or disputes about specific corrections? Open an issue at:
 https://github.com/lucasastorian/intellifin-agent/issues
