@@ -48,7 +48,7 @@ def run_agent(query: str, user_agent: str, model: str, max_iter: int,
     )
 
     asyncio.run(agent.run(query=query))
-    print_messages(messages=agent.messages)
+    # print_messages(messages=agent.messages)
     print_run_summary(agent=agent)
 
 
