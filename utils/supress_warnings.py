@@ -18,3 +18,19 @@ def suppress_edgar_no_xbrl_warnings() -> None:
 
     logging.getLogger("edgar.core").addFilter(_NoXbrlFilter())
 
+
+def suppress_pyrate_limiter_warnings() -> None:
+    """Suppress pyrate_limiter warning: "async call made without an async bucket".
+
+    We target only this specific noisy warning to avoid hiding useful logs.
+    """
+
+    class _AsyncBucketFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                return "async call made without an async bucket" not in record.getMessage()
+            except Exception:
+                return True
+
+    logger = logging.getLogger("pyrate_limiter")
+    logger.addFilter(_AsyncBucketFilter())

@@ -56,13 +56,12 @@ class Company:
 
         lock = await self._get_company_lock(ticker=self.symbol)
         async with lock:
-            async with self.database.batch_embeddings():
-                synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
-                                                          start_date=start_date,
-                                                          end_date=end_date)
+            synced_count = await self._upsert_filings(edgar_company=edgar_company, company=company, forms=forms,
+                                                      start_date=start_date,
+                                                      end_date=end_date)
 
-                if include_earnings_transcripts:
-                    await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
+            if include_earnings_transcripts:
+                await self._sync_transcripts(company=company, start_date=start_date, end_date=end_date)
 
         return synced_count
 
@@ -223,7 +222,6 @@ class Company:
             for batch_data in batch_results:
                 for transcript_data in batch_data:
                     if self._is_transcript_in_range(transcript_data, filtered_dates):
-                        # Skip if transcript already exists
                         if await self._is_transcript_synced(
                                 company_id=company['id'],
                                 fiscal_year=transcript_data['year'],
@@ -310,7 +308,7 @@ class Company:
         fiscal_period = f"Q{fiscal_quarter}" if fiscal_quarter != 3 else "FY"
         response = await self.database.table("earnings_transcripts").select("id").eq(
             "company_id", company_id
-        ).eq("fiscal_year", fiscal_year).eq("fiscal_period", fiscal_period).limit(1).execute()
+        ).eq("fiscal_year", fiscal_year).eq("fiscal_period", fiscal_period).eq("synced", True).limit(1).execute()
 
         return len(response.data) > 0
 
@@ -327,7 +325,7 @@ class Company:
 
         response = await self.database.table("earnings_transcripts").select("fiscal_period").eq(
             "company_id", company_id
-        ).eq("fiscal_year", fiscal_year).execute()
+        ).eq("fiscal_year", fiscal_year).eq("synced", True).execute()
 
         synced_periods = set(r['fiscal_period'] for r in response.data)
 

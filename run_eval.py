@@ -1,6 +1,6 @@
 import asyncio
 import argparse
-from utils.supress_warnings import suppress_edgar_no_xbrl_warnings
+from utils.supress_warnings import suppress_edgar_no_xbrl_warnings, suppress_pyrate_limiter_warnings
 from edgar import set_identity
 from dotenv import load_dotenv
 
@@ -14,8 +14,8 @@ from evals.provision_eval_data import provision_eval_data
 
 
 async def main(args):
-    # Suppress noisy EDGAR warnings about missing XBRL attachments
     suppress_edgar_no_xbrl_warnings()
+    suppress_pyrate_limiter_warnings()
 
     set_identity(args.edgar_user_agent)
 
@@ -24,12 +24,12 @@ async def main(args):
     client = get_client(model=args.model, temperature=1, reasoning_effort=args.reasoning_effort,
                         verbose=args.serial)
 
-    await provision_eval_data(
-        database=database,
-        dataset_path=args.dataset,
-        edgar_user_agent=args.edgar_user_agent,
-        limit=args.limit,
-    )
+    # await provision_eval_data(
+    #     database=database,
+    #     dataset_path=args.dataset,
+    #     edgar_user_agent=args.edgar_user_agent,
+    #     limit=args.limit,
+    # )
 
     evaluator = Evaluator()
     runner = EvalRunner(
@@ -53,6 +53,7 @@ async def main(args):
         output_dir="evals/results",
         mode=eval_mode,
         limit=args.limit,
+        start=args.start,
         reasoning_effort=args.reasoning_effort,
         serial=args.serial,
         verbose=args.serial,
@@ -99,6 +100,13 @@ if __name__ == '__main__':
         type=int,
         help='Limit evaluation to first N questions (useful for testing)',
         default=50
+    )
+
+    parser.add_argument(
+        '--start',
+        type=int,
+        help="The question to start with. 0 indexed. Slices the dataset",
+        default=0
     )
 
     parser.add_argument(

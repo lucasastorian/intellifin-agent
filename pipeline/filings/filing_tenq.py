@@ -13,27 +13,28 @@ class FilingTenQ(BaseFiling):
 
     async def upsert(self):
         """Upserts the 10-Q filing and associated pages"""
-        xbrl = await self._load_xbrl()
+        async with self.database.batch_embeddings():
+            xbrl = await self._load_xbrl()
 
-        # if xbrl is None:
-        #     logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
+            # if xbrl is None:
+            #     logger.warning(f"Filing {self.filing.form} ({self.accession_number}) missing an XBRL attachment")
 
-        # Filing and pages
-        filing = await self._upsert_filing(xbrl=xbrl)
-        pages = await self._upsert_filing_pages(filing_id=filing['id'])
+            # Filing and pages
+            filing = await self._upsert_filing(xbrl=xbrl)
+            pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
+            await self._upsert_financial_statements(xbrl=xbrl, filing_id=filing['id'])
 
-        sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
-        await self._upsert_filing_section_chunks(filing=filing, sections=sections)
+            sections = await self._upsert_filing_section_pages(pages=pages, filing=filing)
+            await self._upsert_filing_section_chunks(filing=filing, sections=sections)
 
-        # Filing Notes
-        if self.filing.reports:
-            note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
-            await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
+            # Filing Notes
+            if self.filing.reports:
+                note_ids, processed_notes = await self._upsert_filing_notes(filing_id=filing['id'])
+                await self._upsert_filing_note_chunks(note_ids=note_ids, processed_notes=processed_notes, filing=filing)
 
-        # Attachments
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+            # Attachments
+            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata + mark filing as synced
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

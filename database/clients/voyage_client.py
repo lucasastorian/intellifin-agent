@@ -54,7 +54,7 @@ class VoyageClient:
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generates a flat list of embeddings for all texts."""
-        print(f"Generating {len(texts)} embeddings")
+        # print(f"Generating {len(texts)} embeddings")
         if not self.cache:
             all_embeddings = []
             for batch in await self._batch_texts(texts=texts):
@@ -293,7 +293,7 @@ class VoyageClient:
             Nested list of embeddings: List[List[float]] where each inner list
             contains embeddings for one document's chunks
         """
-        print(f"Generating contextual embeddings for {len(inputs)} docs")
+        # print(f"Generating contextual embeddings for {len(inputs)} docs")
         if not inputs:
             return []
 

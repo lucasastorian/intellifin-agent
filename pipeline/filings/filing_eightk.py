@@ -17,14 +17,15 @@ class FilingEightK(BaseFiling):
 
     async def upsert(self):
         """Upserts filing, filing pages, attachments/pages, press release chunks and filing chunks (abbrev)"""
-        xbrl = await self._load_xbrl()
+        async with self.database.batch_embeddings():
+            xbrl = await self._load_xbrl()
 
-        filing = await self._upsert_filing(xbrl=xbrl)
-        pages = await self._upsert_filing_pages(filing_id=filing['id'])
+            filing = await self._upsert_filing(xbrl=xbrl)
+            pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        # NOTE: chunking filing + press release missing here !
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
-        attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
+            # NOTE: chunking filing + press release missing here !
+            await self._upsert_filing_chunks(pages=pages, filing=filing)
+            attachment_data = await self._upsert_attachments_and_pages(filing_id=filing['id'])
 
         # Metadata update + sync complete
         await self._update_filing_counts(num_pages=len(pages), num_attachments=len(attachment_data),

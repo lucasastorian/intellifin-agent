@@ -9,12 +9,13 @@ class FilingDefFourteenA(BaseFiling):
 
     async def upsert(self):
         """Upserts the DEF 14A filing and chunks the proxy statement content"""
-        xbrl = await self._load_xbrl()
+        async with self.database.batch_embeddings():
+            xbrl = await self._load_xbrl()
 
-        filing = await self._upsert_filing(xbrl=xbrl)
-        pages = await self._upsert_filing_pages(filing_id=filing['id'])
+            filing = await self._upsert_filing(xbrl=xbrl)
+            pages = await self._upsert_filing_pages(filing_id=filing['id'])
 
-        await self._upsert_filing_chunks(pages=pages, filing=filing)
+            await self._upsert_filing_chunks(pages=pages, filing=filing)
 
         await self._update_filing_counts(num_pages=len(pages), num_attachments=0, filing_id=filing['id'])
         await self._mark_synced(filing_id=filing['id'])

@@ -160,10 +160,7 @@ class SemanticSearchAction(BaseAction):
         self.log_start("SemanticSearch", params=params)
 
         forms = self._get_forms_for_document_types(args.document_types)
-        include_transcripts = (
-                "earnings_transcript" in args.document_types or
-                "earnings_transcripts" in args.document_types
-        )
+        include_transcripts = "earnings_transcripts" in args.document_types
 
         not_found = await self.sync_symbols(
             symbols=[args.symbol],
@@ -172,9 +169,9 @@ class SemanticSearchAction(BaseAction):
             end_date=args.end_date,
             include_earnings_transcripts=include_transcripts
         )
-
-        if self.verbose:
-            print("  → Sync complete.", flush=True)
+        #
+        # if self.verbose:
+        #     print("  → Sync complete.", flush=True)
 
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
@@ -197,7 +194,7 @@ class SemanticSearchAction(BaseAction):
                 self._search_attachment_chunks(args, forms)
             ])
 
-        if "earnings_transcript" in args.document_types or "earnings_transcripts" in args.document_types:
+        if "earnings_transcripts" in args.document_types:
             tasks.append(self._search_transcript_chunks(args))
 
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -239,22 +236,26 @@ class SemanticSearchAction(BaseAction):
                 )
             )
 
-        if all_results:
-            try:
-                rr = await self.database.embedder.rerank(query=args.query,
-                                                         documents=[r['embedding'] for r in all_results],
-                                                         top_k=args.limit)
-                top_results = [{**all_results[x['index']],
-                                '_original_score': all_results[x['index']].get('_score', 0.0),
-                                'relevance_score': x['relevance_score'],
-                                '_score': x['relevance_score']} for x in rr]
-            except Exception as e:
-                self.log_error(f"Rerank failed, using vector scores: {e}")
-                all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
-                top_results = all_results[:args.limit]
-        else:
-            all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
-            top_results = all_results[:args.limit]
+        # if all_results:
+        #     try:
+        #         rr = await self.database.embedder.rerank(query=args.query,
+        #                                                  documents=[r['embedding'] for r in all_results],
+        #                                                  top_k=args.limit)
+        #         top_results = [{**all_results[x['index']],
+        #                         '_original_score': all_results[x['index']].get('_score', 0.0),
+        #                         'relevance_score': x['relevance_score'],
+        #                         '_score': x['relevance_score']} for x in rr]
+        #     except Exception as e:
+        #         self.log_error(f"Rerank failed, using vector scores: {e}")
+        #         all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+        #         top_results = all_results[:args.limit]
+        # else:
+        #     all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+        #     top_results = all_results[:args.limit]
+
+        all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+        # top_results = all_results[:args.limit]
+        top_results = all_results
 
         # if self.verbose and top_results:
         #     try:
@@ -479,14 +480,12 @@ class SemanticSearchAction(BaseAction):
         """Format filing note chunk result"""
         from datetime import datetime
 
-        excerpt_id = r['id']
         note_title = r['note_title']
         company_name = r['company_name']
         symbols = ','.join(r['company_symbols'])
         form = r['form']
         filing_date = datetime.strptime(r['filing_date'], '%Y-%m-%d').strftime('%B %-d, %Y')
         content = r['content'].strip()
-        score = r.get('_score', 0.0)
         fy = r.get('fiscal_year') or '—'
         fp = r.get('fiscal_period') or '—'
 

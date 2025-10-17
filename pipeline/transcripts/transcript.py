@@ -21,10 +21,13 @@ class Transcript:
 
     async def upsert(self):
         """Upserts the transcript, and the relevant chunks"""
-        sections = self.parser.parse(content=self.content)
-        transcript_id = await self._upsert_transcript(sections=sections)
+        async with self.database.batch_embeddings():
+            sections = self.parser.parse(content=self.content)
+            transcript_id = await self._upsert_transcript(sections=sections)
 
-        await self._upsert_transcript_chunks(sections=sections, transcript_id=transcript_id)
+            await self._upsert_transcript_chunks(sections=sections, transcript_id=transcript_id)
+
+        await self.database.table("earnings_transcripts").update({"synced": True}).eq("id", transcript_id).execute()
 
     async def _upsert_transcript(self, sections: List[Dict[str, str]]) -> int:
         """Upserts the transcript and returns the transcript ID"""

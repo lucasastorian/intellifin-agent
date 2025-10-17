@@ -18,11 +18,11 @@ class EvalRunner:
     """Orchestrates running evals, grading, and generating reports"""
 
     def __init__(
-        self,
-        edgar_user_agent: str,
-        client: BaseClient,
-        evaluator: Evaluator,
-        max_iter: int = 20
+            self,
+            edgar_user_agent: str,
+            client: BaseClient,
+            evaluator: Evaluator,
+            max_iter: int = 20
     ):
         self.edgar_user_agent = edgar_user_agent
         self.client = client
@@ -30,20 +30,22 @@ class EvalRunner:
         self.max_iter = max_iter
 
     async def run_eval(
-        self,
-        dataset_path: str,
-        output_dir: str = "evals/results",
-        mode: EvalMode = EvalMode.STANDARD,
-        limit: int = None,
-        reasoning_effort: str = "low",
-        temperature: float = 1.0,
-        tier: str = "tier-3",
-        serial: bool = False,
-        verbose: bool = False
+            self,
+            dataset_path: str,
+            output_dir: str = "evals/results",
+            mode: EvalMode = EvalMode.STANDARD,
+            limit: int = None,
+            start: int = None,
+            reasoning_effort: str = "low",
+            temperature: float = 1.0,
+            tier: str = "tier-3",
+            serial: bool = False,
+            verbose: bool = False
     ) -> EvalRun:
         dataset = EvalDataset.from_yaml(dataset_path, mode=mode)
 
-        questions = dataset.questions[:limit] if limit else dataset.questions
+        questions = dataset.questions[start:] if start else dataset.questions
+        questions = questions[:limit] if limit else questions
 
         from schema import schema
         database = Database(schema=schema, base_path="./data/intellifin.db")
@@ -52,14 +54,14 @@ class EvalRunner:
             agent_results = await self._run_agent_serial(
                 questions=questions,
                 database=database,
-                skip_sync=True,
+                skip_sync=False,
                 verbose=verbose
             )
         else:
             agent_results = await self._run_agent_parallel(
                 questions=questions,
                 database=database,
-                skip_sync=True,
+                skip_sync=False,
                 verbose=verbose
             )
 
@@ -84,17 +86,17 @@ class EvalRunner:
 
             results.append(
                 EvalResult(
-                id=question.id,
-                question=question.question,
-                ground_truth=question.ground_truth,
-                agent_answer=agent_result.answer,
-                correct=is_correct,
-                execution_time_seconds=agent_result.execution_time_seconds,
-                cost_usd=agent_result.cost_usd,
-                input_tokens=agent_result.input_tokens,
-                output_tokens=agent_result.output_tokens,
-                num_iter=agent_result.num_iter
-            ))
+                    id=question.id,
+                    question=question.question,
+                    ground_truth=question.ground_truth,
+                    agent_answer=agent_result.answer,
+                    correct=is_correct,
+                    execution_time_seconds=agent_result.execution_time_seconds,
+                    cost_usd=agent_result.cost_usd,
+                    input_tokens=agent_result.input_tokens,
+                    output_tokens=agent_result.output_tokens,
+                    num_iter=agent_result.num_iter
+                ))
 
         run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         avg_execution_time = total_execution_time / len(questions) if questions else 0
@@ -134,9 +136,9 @@ class EvalRunner:
 
     def _print_final_summary(self, eval_run: EvalRun):
         """Print a comprehensive summary of the eval run"""
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"FINAL EVAL SUMMARY")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         print(f"Dataset: {eval_run.dataset_name}")
         print(f"Mode: {eval_run.eval_mode.upper()}")
@@ -164,28 +166,28 @@ class EvalRunner:
 
         print(f"Grader: {eval_run.grader_model}\n")
 
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
     async def _run_agent_serial(
-        self,
-        questions: List[Question],
-        database: Database,
-        skip_sync: bool = False,
-        verbose: bool = False
+            self,
+            questions: List[Question],
+            database: Database,
+            skip_sync: bool = False,
+            verbose: bool = False
     ) -> List[AgentResult]:
         """Run agent on all questions serially (one at a time) with real-time output."""
         results = []
         total_cost = 0.0
         correct_count = 0
 
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"SERIAL EVAL: Running {len(questions)} questions one at a time")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         for i, question in enumerate(questions, 1):
-            print(f"\n{'─'*80}")
+            print(f"\n{'─' * 80}")
             print(f"[{i}/{len(questions)}] Question: {question.id}")
-            print(f"{'─'*80}")
+            print(f"{'─' * 80}")
             print(f"Q: {question.question}\n")
 
             agent = Agent(
@@ -227,10 +229,11 @@ class EvalRunner:
             results.append(agent_result)
 
             # Grade immediately after answer
-            print(f"\n{'─'*80}")
+            print(f"\n{'─' * 80}")
             print(f"✓ Completed [{i}/{len(questions)}]")
             print(f"Answer: {result}")
-            print(f"Time: {execution_time:.2f}s | Cost: ${cost:.4f} | Tokens: {agent.usage.input_tokens:,} in / {output_tokens:,} out | Iterations: {agent.num_iter}")
+            print(
+                f"Time: {execution_time:.2f}s | Cost: ${cost:.4f} | Tokens: {agent.usage.input_tokens:,} in / {output_tokens:,} out | Iterations: {agent.num_iter}")
 
             # Evaluate answer in real-time
             print(f"\n🔍 Grading answer...")
@@ -249,27 +252,28 @@ class EvalRunner:
             print(f"Expected: {question.ground_truth}")
             print(f"Notes: {notes}")
 
-            print(f"\nRunning Score: {correct_count}/{i} ({correct_count/i:.1%})")
+            print(f"\nRunning Score: {correct_count}/{i} ({correct_count / i:.1%})")
             print(f"Running Total Cost: ${total_cost:.4f}")
-            print(f"{'─'*80}\n")
+            print(f"{'─' * 80}\n")
 
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"SERIAL EVAL COMPLETE")
         print(f"Total Questions: {len(questions)}")
-        print(f"Final Score: {correct_count}/{len(questions)} ({correct_count/len(questions):.1%})")
+        print(f"Final Score: {correct_count}/{len(questions)} ({correct_count / len(questions):.1%})")
         print(f"Total Cost: ${total_cost:.4f}")
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         return results
 
     async def _run_agent_parallel(
-        self,
-        questions: List[Question],
-        database: Database,
-        skip_sync: bool = False,
-        verbose: bool = False
+            self,
+            questions: List[Question],
+            database: Database,
+            skip_sync: bool = False,
+            verbose: bool = False
     ) -> List[AgentResult]:
         """Run agent on all questions in parallel."""
+
         async def run_single(question: Question) -> AgentResult:
             agent = Agent(
                 database=database,
@@ -310,11 +314,12 @@ class EvalRunner:
         return results
 
     async def _grade_parallel(
-        self,
-        questions: List[Question],
-        answers: List[str]
+            self,
+            questions: List[Question],
+            answers: List[str]
     ) -> List[bool]:
         """Grade all answers in parallel"""
+
         async def grade_single(question: Question, answer: str) -> bool:
             is_correct, _ = await self.evaluator.evaluate(
                 question=question.question,

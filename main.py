@@ -66,7 +66,7 @@ if __name__ == '__main__':
                                  "openai/gpt-oss-120b", "openai/gpt-oss-20b", "moonshotai/kimi-k2-instruct-0905"],
                         help='Model to use (default: gpt-5)')
     parser.add_argument('--max-iter', type=int, default=20, help='Max iterations (default: 15)')
-    parser.add_argument('--reasoning-effort', type=str, default='medium',
+    parser.add_argument('--reasoning-effort', type=str, default='high',
                         choices=['minimal', 'low', 'medium', 'high'],
                         help='Reasoning effort level (default: medium)')
     parser.add_argument('--presync', action='store_true', default=False,

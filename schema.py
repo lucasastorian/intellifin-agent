@@ -460,6 +460,7 @@ class EarningsTranscripts(Table):
     fiscal_period = Enum(choices=['Q1', 'Q2', 'Q3', 'Q4', 'FY'], nullable=False)
 
     sections = JSONField(nullable=False)  # A list of formatted JSON sections
+    synced = Boolean(default=False)
 
     company_id = Integer(nullable=False, foreign_key="companies.id", on_delete="CASCADE", index=True)
 
