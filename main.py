@@ -11,6 +11,10 @@ from schema import schema
 from utils.print_messages import print_messages
 from utils import print_run_summary, presync_tickers, get_client
 from pipeline.company_provisioner import CompanyProvisioner
+from utils.supress_warnings import suppress_edgar_no_xbrl_warnings, suppress_pyrate_limiter_warnings
+
+suppress_pyrate_limiter_warnings()
+suppress_edgar_no_xbrl_warnings()
 
 
 def run_agent(query: str, user_agent: str, model: str, max_iter: int,

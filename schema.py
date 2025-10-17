@@ -598,6 +598,7 @@ class CompanyEarningsTranscriptChunks(View):
     transcript_id = Field(table="earnings_transcript_chunks", field="transcript_id")
     fiscal_year = Field(table="earnings_transcripts", field="fiscal_year")
     fiscal_period = Field(table="earnings_transcripts", field="fiscal_period")
+    date = Field(table="earnings_transcripts", field="date")
 
     company_id = Field(table="earnings_transcript_chunks", field="company_id")
     company_name = Field(table="companies", field="name")

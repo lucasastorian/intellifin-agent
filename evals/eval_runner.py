@@ -32,7 +32,7 @@ class EvalRunner:
     async def run_eval(
             self,
             dataset_path: str,
-            output_dir: str = "evals/results",
+            output_dir: str = "eval_results",
             mode: EvalMode = EvalMode.STANDARD,
             limit: int = None,
             start: int = None,
@@ -47,6 +47,7 @@ class EvalRunner:
         questions = dataset.questions[start:] if start else dataset.questions
         questions = questions[:limit] if limit else questions
 
+
         from schema import schema
         database = Database(schema=schema, base_path="./data/intellifin.db")
 
@@ -55,7 +56,8 @@ class EvalRunner:
                 questions=questions,
                 database=database,
                 skip_sync=False,
-                verbose=verbose
+                verbose=verbose,
+                start=start
             )
         else:
             agent_results = await self._run_agent_parallel(
@@ -173,7 +175,8 @@ class EvalRunner:
             questions: List[Question],
             database: Database,
             skip_sync: bool = False,
-            verbose: bool = False
+            verbose: bool = False,
+            start: int = 1
     ) -> List[AgentResult]:
         """Run agent on all questions serially (one at a time) with real-time output."""
         results = []
@@ -184,7 +187,7 @@ class EvalRunner:
         print(f"SERIAL EVAL: Running {len(questions)} questions one at a time")
         print(f"{'=' * 80}\n")
 
-        for i, question in enumerate(questions, 1):
+        for i, question in enumerate(questions, start):
             print(f"\n{'─' * 80}")
             print(f"[{i}/{len(questions)}] Question: {question.id}")
             print(f"{'─' * 80}")
@@ -340,13 +343,11 @@ class EvalRunner:
 
     def _save_markdown_report(self, eval_run: EvalRun, path: Path):
         """Save human-readable markdown report"""
-        # Build model config line
         model_info = f"**Model**: {eval_run.model} ({eval_run.provider})"
         if eval_run.reasoning_effort:
             model_info += f" | **Reasoning**: {eval_run.reasoning_effort}"
         model_info += f" | **Temp**: {eval_run.temperature} | **Tier**: {eval_run.tier} | **Max Iter**: {eval_run.max_iter}"
 
-        # Build performance metrics line
         perf_info = f"**Total Cost**: ${eval_run.total_cost_usd:.2f} | **Avg Time**: {eval_run.avg_execution_time_seconds:.1f}s | **Tokens**: {eval_run.total_input_tokens:,} in / {eval_run.total_output_tokens:,} out"
 
         lines = [

@@ -171,7 +171,7 @@ class VoyageClient:
     #     ))
     # )
     async def rerank(self, query: str, documents: List[str], top_k: Optional[int] = None, model: Optional[str] = None,
-                     truncation: bool = True) -> List[Dict]:
+                     truncation: bool = False) -> List[Dict]:
         """Rerank documents by relevance to query using Voyage rerank API."""
         if not documents:
             return []
@@ -180,8 +180,6 @@ class VoyageClient:
             raise ValueError(f"Rerank API supports max 1000 documents, got {len(documents)}")
 
         model = model or self.rerank_model
-
-        logging.debug(f"Reranking {len(documents)} documents with model {model}")
 
         try:
             async with self.request_rate_limiter.context():

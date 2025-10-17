@@ -1,6 +1,6 @@
 import asyncio
 import traceback
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Literal, Optional
 from datetime import date, timedelta
 
@@ -33,6 +33,7 @@ class SemanticSearch(BaseModel):
     * Include temporal context: "Q1 2024 guidance", "fiscal 2023 depreciation", "forward-looking capex"
     * Specify what you expect: "percentage breakdown", "dollar amounts", "risk factors related to..."
     * Think about document type: earnings calls for guidance, 8-Ks for events, 10-Ks for policies
+    * Date filters are by filing_date for filings, not report date. For earnings calls, it's the date the call took place (in both cases, this is a few months after the report date)
     """
     symbol: str = Field(
         description="Stock ticker symbol (e.g., 'AAPL', 'MSFT')"
@@ -48,11 +49,11 @@ class SemanticSearch(BaseModel):
         min_length=5
     )
 
-    start_date: str = Field(
+    filing_start_date: str = Field(
         description="Start date (YYYY-MM-DD)."
     )
 
-    end_date: str = Field(
+    filing_end_date: str = Field(
         default_factory=default_end_date,
         description="End date (YYYY-MM-DD). Defaults to today."
     )
@@ -85,6 +86,24 @@ class SemanticSearch(BaseModel):
         description="Number of results to return. Start with 5 for most queries."
     )
 
+    @field_validator('filing_end_date')
+    @classmethod
+    def validate_date_range(cls, v: str, info) -> str:
+        """Ensure date range is at least 1 month (30 days)"""
+        filing_start_date = info.data.get('filing_start_date')
+        if filing_start_date:
+            from datetime import datetime
+            start = datetime.strptime(filing_start_date, '%Y-%m-%d')
+            end = datetime.strptime(v, '%Y-%m-%d')
+            diff_days = (end - start).days
+
+            if diff_days < 30:
+                raise ValueError(
+                    f"Date range must be at least 1 month (30 days). "
+                    f"Current range: {diff_days} days from {filing_start_date} to {v}"
+                )
+        return v
+
     class Config:
         json_schema_extra = {
             "examples": [
@@ -92,14 +111,14 @@ class SemanticSearch(BaseModel):
                     "symbol": "MSFT",
                     "query": "Microsoft's forward-looking capital expenditure plans and guidance for building out AI datacenter infrastructure and purchasing GPUs in fiscal years 2025 and 2026. Looking for any specific dollar amounts they've disclosed, whether they've broken this down by geographic region or business segment, and any commentary from management about the scale of these investments relative to prior years.",
                     "document_types": ["earnings_transcript"],
-                    "start_date": "2024-01-01",
+                    "filing_start_date": "2024-01-01",
                     "limit": 5
                 },
                 {
                     "symbol": "NVDA",
                     "query": "NVIDIA's risk factor disclosures and commentary about US export control regulations that restrict their ability to sell chips to Chinese customers. Looking for any quantitative estimates of revenue impact, what workarounds or alternative product designs they're pursuing to stay compliant, and management's assessment of how burdensome these regulations are for their business operations.",
                     "document_types": ["annual_report", "quarterly_report"],
-                    "start_date": "2024-01-01",
+                    "filing_start_date": "2024-01-01",
                     "limit": 10
                 },
                 {
@@ -107,7 +126,7 @@ class SemanticSearch(BaseModel):
                     "query": "Tesla's quarterly vehicle delivery and production results broken down by individual vehicle model - specifically Model 3, Model Y, Model S, Model X, and Cybertruck. Looking for both the raw unit numbers and growth rates calculated on a sequential quarter-over-quarter basis and year-over-year basis.",
                     "document_types": ["current_report"],
                     "current_report_focus": ["press_releases_and_investor_presentations"],
-                    "start_date": "2024-01-01",
+                    "filing_start_date": "2024-01-01",
                     "limit": 10
                 },
                 {
@@ -115,14 +134,14 @@ class SemanticSearch(BaseModel):
                     "query": "The definitive terms of AT&T's senior unsecured notes offering, including the total principal amount they raised, the annual interest rate or coupon rate they're paying to bondholders, when the notes mature, what they plan to use the proceeds for, and any redemption provisions or financial covenants disclosed in the indenture or pricing supplement documents.",
                     "document_types": ["current_report"],
                     "current_report_focus": ["financing_terms", "debt_terms"],
-                    "start_date": "2024-01-01",
+                    "filing_start_date": "2024-01-01",
                     "limit": 5
                 },
                 {
                     "symbol": "META",
                     "query": "Meta's accounting policies describing how they decide whether to capitalize or expense their internal-use software development costs. Looking for the specific criteria they use to make this decision, how many years they amortize capitalized amounts over, what categories of costs qualify for capitalization (like employee salaries, external consultant fees, allocated overhead), and whether they've changed this policy recently.",
                     "document_types": ["annual_report"],
-                    "start_date": "2023-01-01",
+                    "filing_start_date": "2023-01-01",
                     "limit": 5
                 },
                 {
@@ -130,7 +149,7 @@ class SemanticSearch(BaseModel):
                     "query": "The definitive merger or acquisition agreement where Disney acquired another company, including the total purchase price Disney paid, whether the deal was structured as a cash transaction or stock transaction, any earnout provisions or contingent payments based on future performance, key representations and warranties from both parties, material adverse change clauses that could allow termination, any breakup or termination fees, and the expected timeline for closing the transaction.",
                     "document_types": ["current_report"],
                     "current_report_focus": ["merger_terms"],
-                    "start_date": "2024-01-01",
+                    "filing_start_date": "2024-01-01",
                     "limit": 5
                 }
             ]
@@ -153,7 +172,8 @@ class SemanticSearchAction(BaseAction):
                 message=Message(role="tool", status="completed", content=str(e), error=True, action_id=action.id)
             )
 
-        params = f"symbol={args.symbol}, query='{args.query}', {args.start_date} → {args.end_date}, documents={args.document_types}"
+        params = (f"symbol={args.symbol}, query='{args.query}', {args.filing_start_date} → {args.filing_end_date}, "
+                  f"documents={args.document_types}")
         if args.current_report_focus:
             params += f", focus={args.current_report_focus}"
         params += f", limit={args.limit}"
@@ -165,13 +185,10 @@ class SemanticSearchAction(BaseAction):
         not_found = await self.sync_symbols(
             symbols=[args.symbol],
             forms=forms,
-            start_date=args.start_date,
-            end_date=args.end_date,
+            start_date=args.filing_start_date,
+            end_date=args.filing_end_date,
             include_earnings_transcripts=include_transcripts
         )
-        #
-        # if self.verbose:
-        #     print("  → Sync complete.", flush=True)
 
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
@@ -236,26 +253,33 @@ class SemanticSearchAction(BaseAction):
                 )
             )
 
-        # if all_results:
-        #     try:
-        #         rr = await self.database.embedder.rerank(query=args.query,
-        #                                                  documents=[r['embedding'] for r in all_results],
-        #                                                  top_k=args.limit)
-        #         top_results = [{**all_results[x['index']],
-        #                         '_original_score': all_results[x['index']].get('_score', 0.0),
-        #                         'relevance_score': x['relevance_score'],
-        #                         '_score': x['relevance_score']} for x in rr]
-        #     except Exception as e:
-        #         self.log_error(f"Rerank failed, using vector scores: {e}")
-        #         all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
-        #         top_results = all_results[:args.limit]
-        # else:
-        #     all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
-        #     top_results = all_results[:args.limit]
+        if all_results:
+            try:
+                num_tokens = self.database.embedder.count_tokens(texts=[r['embedding'] for r in all_results],
+                                                                 model='rerank-2.5')
+                # print(f"Reranking {len(all_results)} with {num_tokens}")
+                rr = await self.database.embedder.rerank(query=args.query,
+                                                         documents=[r['embedding'] for r in all_results],
+                                                         top_k=args.limit)
 
-        all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
-        # top_results = all_results[:args.limit]
-        top_results = all_results
+                top_results = [{**all_results[x['index']],
+                                '_original_score': all_results[x['index']].get('_score', 0.0),
+                                'relevance_score': x['relevance_score'],
+                                '_score': x['relevance_score']} for x in rr]
+
+            except Exception as e:
+                traceback.print_exc()
+                self.log_error(f"Rerank failed, using vector scores: {e}")
+                all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+                top_results = all_results[:args.limit]
+
+        else:
+            all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+            top_results = all_results[:args.limit]
+
+        # all_results.sort(key=lambda r: r.get('_score', 0), reverse=True)
+        # # top_results = all_results[:args.limit]
+        # top_results = all_results
 
         # if self.verbose and top_results:
         #     try:
@@ -289,8 +313,6 @@ class SemanticSearchAction(BaseAction):
             )
         )
 
-    # (Removed helper: minimal rerank now uses 'embedding' directly)
-
     async def _search_note_chunks(self, args: SemanticSearch, forms: List[str]) -> List[dict]:
         """Vector search filing note chunks"""
         try:
@@ -304,8 +326,8 @@ class SemanticSearchAction(BaseAction):
                 )
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
-                .gte("filing_date", args.start_date)
-                .lte("filing_date", args.end_date)
+                .gte("filing_date", args.filing_start_date)
+                .lte("filing_date", args.filing_end_date)
                 .vector_search(
                     args.query,
                     "embedding",
@@ -317,6 +339,8 @@ class SemanticSearchAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'filing_note_chunk'
+
+            # print(f"Returning {len(result.data)} note chunks")
 
             return result.data
 
@@ -337,8 +361,8 @@ class SemanticSearchAction(BaseAction):
                 )
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
-                .gte("report_date", args.start_date)
-                .lte("report_date", args.end_date)
+                .gte("report_date", args.filing_start_date)
+                .lte("report_date", args.filing_end_date)
                 .vector_search(
                     args.query,
                     "embedding",
@@ -350,6 +374,8 @@ class SemanticSearchAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'filing_section_chunk'
+
+                # print(f"Returning {len(result.data)} section chunks")
 
             return result.data
 
@@ -370,11 +396,10 @@ class SemanticSearchAction(BaseAction):
                 )
                 .contains("company_symbols", args.symbol)
                 .in_("form", forms)
-                .gte("filing_date", args.start_date)
-                .lte("filing_date", args.end_date)
+                .gte("filing_date", args.filing_start_date)
+                .lte("filing_date", args.filing_end_date)
             )
 
-            # Apply current_report_focus filtering if specified
             if args.current_report_focus:
                 attachment_types = self._get_attachment_types_for_focus(args.current_report_focus)
                 query = query.in_("attachment_type", attachment_types)
@@ -390,6 +415,8 @@ class SemanticSearchAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'filing_attachment_chunk'
+
+                # print(f"Returning {len(result.data)} attachment chunks")
 
             return result.data
 
@@ -408,6 +435,8 @@ class SemanticSearchAction(BaseAction):
                     "company_name,company_symbols"
                 )
                 .contains("company_symbols", args.symbol)
+                .gte("date", args.filing_start_date)
+                .lte("date", args.filing_end_date)
                 .vector_search(
                     args.query,
                     "embedding",
@@ -419,6 +448,8 @@ class SemanticSearchAction(BaseAction):
 
             for r in result.data:
                 r['_type'] = 'earnings_transcript_chunk'
+
+            # print(f"Returning {len(result.data)} transcript chunks")
 
             return result.data
 
@@ -490,7 +521,7 @@ class SemanticSearchAction(BaseAction):
         fp = r.get('fiscal_period') or '—'
 
         return (
-            f"**[Excerpt #{index} |  Note: {note_title}**  Filing #{r['filing_id']}\n"
+            f"Note: {note_title}**  Filing #{r['filing_id']}\n"
             f"{company_name} ({symbols}) | {form} | Fiscal: {fp} {fy} | Filed: {filing_date}\n\n"
             f"{content}\n\n---\n"
         )
@@ -500,7 +531,6 @@ class SemanticSearchAction(BaseAction):
         """Format filing section chunk result"""
         from datetime import datetime
 
-        excerpt_id = r['id']
         company_name = r['company_name']
         symbols = ','.join(r['company_symbols'])
         form = r['form']
@@ -527,7 +557,7 @@ class SemanticSearchAction(BaseAction):
             f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-                f"**[Excerpt #{index} | {section} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"{section} ({page_display})** | Filing #{r['filing_id']}\n"
                 f"{company_name} ({symbols}) | {form} | Filed: {filing_date} | Report: {report_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") + "\n\n" +
                 f"{content}\n\n---\n"
@@ -566,7 +596,7 @@ class SemanticSearchAction(BaseAction):
             f"FY{fiscal_year}" if fiscal_year else "")
 
         return (
-                f"**[Excerpt #{index} | {attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
+                f"{attachment_type}: EX-{exhibit_number} ({page_display})** | Filing #{r['filing_id']}\n"
                 f"{company_name} ({symbols}) | {form} | Filed: {filing_date}" +
                 (f" | {fiscal_info}" if fiscal_info else "") +
                 (f"\n{description}" if description else "") + "\n\n" +
@@ -592,7 +622,7 @@ class SemanticSearchAction(BaseAction):
         content = "\n\n".join(content_parts)
 
         return (
-            f"**[Excerpt #{index} | Earnings Transcript** | Transcript #{r['transcript_id']}\n"
+            f"Earnings Transcript** | Transcript #{r['transcript_id']}\n"
             f"{company_name} ({symbols}) | {fiscal_period} FY{fiscal_year}\n\n"
             f"{content}\n\n---\n"
         )

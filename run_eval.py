@@ -12,11 +12,11 @@ from evals.answer_evaluator import Evaluator
 from schema import schema
 from evals.provision_eval_data import provision_eval_data
 
+suppress_edgar_no_xbrl_warnings()
+suppress_pyrate_limiter_warnings()
+
 
 async def main(args):
-    suppress_edgar_no_xbrl_warnings()
-    suppress_pyrate_limiter_warnings()
-
     set_identity(args.edgar_user_agent)
 
     database = Database(schema=schema, base_path="./data/intellifin.db")
@@ -50,7 +50,7 @@ async def main(args):
 
     await runner.run_eval(
         dataset_path=args.dataset,
-        output_dir="evals/results",
+        output_dir="eval_results",
         mode=eval_mode,
         limit=args.limit,
         start=args.start,
