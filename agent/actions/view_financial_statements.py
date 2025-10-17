@@ -65,15 +65,51 @@ class ViewFinancialStatementsAction(BaseAction):
         params = f"{args.symbol} {args.statement_type} ({args.report_type}), {args.start_date} → {args.end_date}"
         self.log_start("ViewFinancialStatements", params)
 
+        # Check if company is foreign when requesting quarterly
         if args.report_type == 'quarterly':
+            company_result = await (
+                self.database
+                .table("companies")
+                .select("country")
+                .contains("symbols", args.symbol)
+                .execute()
+            )
+
+            if company_result.data and company_result.data[0].get('country') != 'United States':
+                self.log_error(f"Foreign company - no quarterly XBRL financials")
+                return ActionResponse(
+                    message=Message(
+                        role="tool",
+                        status="completed",
+                        content=(
+                            f"{args.symbol} is a foreign company listed in the US. "
+                            f"Foreign companies do not file quarterly XBRL financials (10-Q). "
+                            f"They file annual 20-F reports and 6-K reports for material events. "
+                            f"Try searching 6-K filings for interim financial updates instead."
+                        ),
+                        error=True,
+                        action_id=action.id
+                    )
+                )
+
+        # Determine forms and date range based on report type
+        if args.report_type == 'quarterly':
+            # Load extra year back for prior period comparisons
             load_start_date = (date.fromisoformat(args.start_date) - timedelta(days=365)).isoformat()
-            forms = ['10-Q', '10-Q/A', '10-K', '10-K/A', '20-F', '20-F/A']
+            forms = ['10-Q', '10-Q/A']
+            fiscal_period_filter = ("neq", "FY")  # Q1, Q2, Q3, Q4
         else:
             load_start_date = args.start_date
             forms = ['10-K', '10-K/A', '20-F', '20-F/A']
+            fiscal_period_filter = ("eq", "FY")  # Annual only
 
-        not_found = await self.sync_symbols(symbols=[args.symbol], forms=forms,
-                                            start_date=load_start_date, end_date=args.end_date)
+        not_found = await self.sync_symbols(
+            symbols=[args.symbol],
+            forms=forms,
+            start_date=load_start_date,
+            end_date=args.end_date
+        )
+
         if not_found:
             self.log_error(f"Symbol not found: {args.symbol}")
             return ActionResponse(
@@ -87,13 +123,23 @@ class ViewFinancialStatementsAction(BaseAction):
             )
 
         try:
-            result = await (
+            # Build query with appropriate fiscal_period filter
+            query = (
                 self.database
                 .table("company_financial_statements")
                 .select("data,report_date,fiscal_year,fiscal_period,form")
                 .contains("company_symbols", args.symbol)
                 .eq("type", args.statement_type)
-                .in_("form", forms)
+            )
+
+            # Apply fiscal_period filter
+            if fiscal_period_filter[0] == "eq":
+                query = query.eq("fiscal_period", fiscal_period_filter[1])
+            else:
+                query = query.neq("fiscal_period", fiscal_period_filter[1])
+
+            result = await (
+                query
                 .gte("report_date", load_start_date)
                 .lte("report_date", args.end_date)
                 .execute()
@@ -187,13 +233,11 @@ class ViewFinancialStatementsAction(BaseAction):
 
         # Add indentation and axis grouping labels
         output_rows = []
-        current_concept = None
         current_axis = None
 
         for idx, row in display_df.iterrows():
             # Check if we're starting a new parent concept (dimension=False, level=0)
             if row['dimension'] == False and row['level'] == 0:
-                current_concept = row['label']
                 current_axis = None
                 # Add parent row with indentation
                 label = '  ' * int(row['level']) + row['label']

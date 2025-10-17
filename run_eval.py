@@ -21,8 +21,9 @@ async def main(args):
 
     database = Database(schema=schema, base_path="./data/intellifin.db")
 
+    # Verbose output only in serial mode (not parallel)
     client = get_client(model=args.model, temperature=1, reasoning_effort=args.reasoning_effort,
-                        verbose=args.serial)
+                        verbose=not args.parallel)
 
     # await provision_eval_data(
     #     database=database,
@@ -55,8 +56,8 @@ async def main(args):
         limit=args.limit,
         start=args.start,
         reasoning_effort=args.reasoning_effort,
-        serial=args.serial,
-        verbose=args.serial,
+        parallel=args.parallel,
+        verbose=not args.parallel,
     )
 
 
@@ -115,9 +116,9 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
-        '--serial',
+        '--parallel',
         action='store_true',
-        help='Run evaluations serially instead of in parallel (for debugging)'
+        help='Run evaluations in parallel (default is serial for detailed output)'
     )
 
     args = parser.parse_args()

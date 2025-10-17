@@ -5,6 +5,7 @@ def suppress_edgar_no_xbrl_warnings() -> None:
     """
     Suppress noisy EDGAR warnings like:
       "No XBRL attachments found in filing ..."
+      "is an amended filing and may not contain full XBRL data ..."
 
     This keeps logs clean during eval runs without muting all edgar.core logs.
     """
@@ -12,7 +13,11 @@ def suppress_edgar_no_xbrl_warnings() -> None:
     class _NoXbrlFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
             try:
-                return "No XBRL attachments found in filing" not in record.getMessage()
+                message = record.getMessage()
+                return (
+                    "No XBRL attachments found in filing" not in message
+                    and "is an amended filing and may not contain full XBRL data" not in message
+                )
             except Exception:
                 return True
 

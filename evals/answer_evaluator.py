@@ -12,7 +12,8 @@ Evaluation criteria:
 - Mark as "Yes" if the answer conveys the same core factual information as the actual answer, even if phrased differently
 - Mark as "No" if the answer contradicts the actual answer or states incorrect information
 - Focus on factual correctness, not stylistic differences
-- For numerical/quantitative questions, the specific values must match
+- If the answer contains additional information that is NOT in the same scope as the question (e.g., 2018 revenues when the question asks for 2019/2020), you can still mark as correct
+- For numerical/quantitative questions, the specific values must match - however, you can allow for minor rounding errors.
 - For comparative questions (e.g., "most", "least"), the comparison must be correct
 
 Be strict but fair - minor wording differences are acceptable if the facts are correct.

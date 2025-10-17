@@ -14,7 +14,7 @@ certifi==2025.8.3
 charset-normalizer==3.4.3
 distro==1.9.0
 docstring_parser==0.17.0
--e git+https://github.com/lucasastorian/edgartools@51c4eddc4c55c65c7825e77f3cfd2271c525480e#egg=edgartools
+edgartools-async==1.0.4
 exceptiongroup==1.3.0
 filelock==3.19.1
 frozenlist==1.7.0

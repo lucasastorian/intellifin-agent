@@ -40,18 +40,17 @@ class ReadFilingAction(BaseAction):
                 )
             )
 
-        self.log_start("ReadFiling", params=f"filing_id={args.filing_id}, pages {args.start_page}-{args.end_page or 'end'}")
-
         # Check if filing exists and get metadata
         filing_result = await (
             self.database
             .table("company_filings")
-            .select("id,form,filing_date,company_name,num_pages")
+            .select("id,form,filing_date,report_date,accession_number,company_name,num_pages")
             .eq("id", args.filing_id)
             .execute()
         )
 
         if not filing_result.data:
+            self.log_start("ReadFiling", params=f"filing_id={args.filing_id}, pages {args.start_page}-{args.end_page or 'end'}")
             self.log_error(f"Filing {args.filing_id} not found")
             return ActionResponse(
                 message=Message(
@@ -65,6 +64,16 @@ class ReadFilingAction(BaseAction):
 
         filing = filing_result.data[0]
         num_pages = filing.get('num_pages') or 0
+
+        # Log with detailed metadata
+        form = filing.get('form', 'N/A')
+        filing_date = filing.get('filing_date', 'N/A')
+        report_date = filing.get('report_date', 'N/A')
+        accession_number = filing.get('accession_number', 'N/A')
+
+        params = (f"filing_id={args.filing_id}, pages {args.start_page}-{args.end_page or 'end'} | "
+                  f"{form} | Filed: {filing_date} | Report: {report_date} | Accession: {accession_number}")
+        self.log_start("ReadFiling", params=params)
 
         # Validate page range
         if args.start_page > num_pages:

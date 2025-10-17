@@ -20,6 +20,7 @@ class EvalResult(BaseModel):
     ground_truth: str
     agent_answer: str
     correct: bool
+    grader_notes: str = ""  # Notes from the AI grader
     human_override: str = ""  # Empty means no override yet
 
     # Performance metrics

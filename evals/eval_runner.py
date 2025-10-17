@@ -1,6 +1,8 @@
 import asyncio
 import json
 import time
+import io
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -39,7 +41,7 @@ class EvalRunner:
             reasoning_effort: str = "low",
             temperature: float = 1.0,
             tier: str = "tier-3",
-            serial: bool = False,
+            parallel: bool = False,
             verbose: bool = False
     ) -> EvalRun:
         dataset = EvalDataset.from_yaml(dataset_path, mode=mode)
@@ -51,16 +53,16 @@ class EvalRunner:
         from schema import schema
         database = Database(schema=schema, base_path="./data/intellifin.db")
 
-        if serial:
-            agent_results = await self._run_agent_serial(
+        if parallel:
+            # Force verbose=False in parallel mode to avoid garbled output
+            agent_results = await self._run_agent_parallel(
                 questions=questions,
                 database=database,
                 skip_sync=False,
-                verbose=verbose,
-                start=start
+                verbose=False
             )
         else:
-            agent_results = await self._run_agent_parallel(
+            agent_results = await self._run_agent_serial(
                 questions=questions,
                 database=database,
                 skip_sync=False,
@@ -68,7 +70,7 @@ class EvalRunner:
             )
 
         agent_answers = [r.answer for r in agent_results]
-        correctness = await self._grade_parallel(questions, agent_answers)
+        grading_results = await self._grade_parallel(questions, agent_answers)
 
         results = []
         correct_count = 0
@@ -77,7 +79,7 @@ class EvalRunner:
         total_input_tokens = 0
         total_output_tokens = 0
 
-        for question, agent_result, is_correct in zip(questions, agent_results, correctness):
+        for question, agent_result, (is_correct, notes) in zip(questions, agent_results, grading_results):
             if is_correct:
                 correct_count += 1
 
@@ -93,6 +95,7 @@ class EvalRunner:
                     ground_truth=question.ground_truth,
                     agent_answer=agent_result.answer,
                     correct=is_correct,
+                    grader_notes=notes,
                     execution_time_seconds=agent_result.execution_time_seconds,
                     cost_usd=agent_result.cost_usd,
                     input_tokens=agent_result.input_tokens,
@@ -102,6 +105,8 @@ class EvalRunner:
 
         run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         avg_execution_time = total_execution_time / len(questions) if questions else 0
+        total_iter = sum(r.num_iter for r in agent_results)
+        avg_iter = total_iter / len(questions) if questions else 0
 
         eval_run = EvalRun(
             dataset_name=dataset.name,
@@ -130,53 +135,43 @@ class EvalRunner:
         self._save_json(eval_run, run_dir / "results.json")
         self._save_markdown_report(eval_run, run_dir / "report.md")
 
-        # Print final summary
-        if verbose or serial:
-            self._print_final_summary(eval_run)
+        # Print final summary (always)
+        self._print_final_summary(eval_run)
 
         return eval_run
 
     def _print_final_summary(self, eval_run: EvalRun):
         """Print a comprehensive summary of the eval run"""
+        # Calculate averages
+        avg_cost = eval_run.total_cost_usd / eval_run.total_questions if eval_run.total_questions else 0
+        avg_tokens_in = eval_run.total_input_tokens / eval_run.total_questions if eval_run.total_questions else 0
+        avg_tokens_out = eval_run.total_output_tokens / eval_run.total_questions if eval_run.total_questions else 0
+        avg_iter = sum(r.num_iter for r in eval_run.results) / eval_run.total_questions if eval_run.total_questions else 0
+
         print(f"\n{'=' * 80}")
-        print(f"FINAL EVAL SUMMARY")
-        print(f"{'=' * 80}\n")
-
-        print(f"Dataset: {eval_run.dataset_name}")
-        print(f"Mode: {eval_run.eval_mode.upper()}")
-        print(f"Run Timestamp: {eval_run.run_timestamp}\n")
-
-        print(f"Model Configuration:")
-        print(f"  • Model: {eval_run.model} ({eval_run.provider})")
-        print(f"  • Temperature: {eval_run.temperature}")
-        print(f"  • Reasoning Effort: {eval_run.reasoning_effort}")
-        print(f"  • Max Iterations: {eval_run.max_iter}")
-        print(f"  • Tier: {eval_run.tier}\n")
-
-        print(f"Results:")
-        print(f"  • Accuracy: {eval_run.correct_count}/{eval_run.total_questions} ({eval_run.accuracy:.1%})")
-        print(f"  • Passed: {eval_run.correct_count}")
-        print(f"  • Failed: {eval_run.total_questions - eval_run.correct_count}\n")
-
-        print(f"Performance:")
-        print(f"  • Total Cost: ${eval_run.total_cost_usd:.4f}")
-        print(f"  • Avg Cost per Question: ${eval_run.total_cost_usd / eval_run.total_questions:.4f}")
-        print(f"  • Avg Execution Time: {eval_run.avg_execution_time_seconds:.2f}s")
-        print(f"  • Total Input Tokens: {eval_run.total_input_tokens:,}")
-        print(f"  • Total Output Tokens: {eval_run.total_output_tokens:,}")
-        print(f"  • Total Tokens: {eval_run.total_input_tokens + eval_run.total_output_tokens:,}\n")
-
+        print(f"FINAL EVAL SUMMARY - {eval_run.dataset_name}")
+        print(f"{'=' * 80}")
         print(f"Grader: {eval_run.grader_model}\n")
 
-        print(f"{'=' * 80}\n")
+        print(f"Model: {eval_run.model} ({eval_run.provider})")
+        print(f"Temperature: {eval_run.temperature} | Reasoning: {eval_run.reasoning_effort} | Max Iter: {eval_run.max_iter}")
+        print(f"Mode: {eval_run.eval_mode.upper()} | Run: {eval_run.run_timestamp}\n")
+
+        print(f"{'─' * 80}\n")
+
+        print(f"Accuracy: {eval_run.correct_count}/{eval_run.total_questions} ({eval_run.accuracy:.1%})")
+        print(f"Total Cost: ${eval_run.total_cost_usd:.4f} | Avg Cost: ${avg_cost:.4f}")
+        print(f"Avg Time: {eval_run.avg_execution_time_seconds:.2f}s | Avg Iter: {avg_iter:.1f}")
+        print(f"Avg Tokens In: {avg_tokens_in:,.0f} | Avg Tokens Out: {avg_tokens_out:,.0f}")
+
+        print(f"\n{'=' * 80}\n")
 
     async def _run_agent_serial(
             self,
             questions: List[Question],
             database: Database,
             skip_sync: bool = False,
-            verbose: bool = False,
-            start: int = 1
+            verbose: bool = False
     ) -> List[AgentResult]:
         """Run agent on all questions serially (one at a time) with real-time output."""
         results = []
@@ -187,7 +182,7 @@ class EvalRunner:
         print(f"SERIAL EVAL: Running {len(questions)} questions one at a time")
         print(f"{'=' * 80}\n")
 
-        for i, question in enumerate(questions, start):
+        for i, question in enumerate(questions, 1):
             print(f"\n{'─' * 80}")
             print(f"[{i}/{len(questions)}] Question: {question.id}")
             print(f"{'─' * 80}")
@@ -275,44 +270,112 @@ class EvalRunner:
             skip_sync: bool = False,
             verbose: bool = False
     ) -> List[AgentResult]:
-        """Run agent on all questions in parallel."""
+        """Run agent on all questions in parallel, printing results as they complete.
 
-        async def run_single(question: Question) -> AgentResult:
-            agent = Agent(
-                database=database,
-                edgar_user_agent=self.edgar_user_agent,
-                client=self.client,
-                max_iter=self.max_iter,
-                verbose=verbose,
-                skip_sync=skip_sync
+        Note: verbose parameter is ignored and forced to False to prevent garbled output.
+        Summary output is printed sequentially as each task completes.
+        Uses a semaphore to limit concurrent execution to 2 tasks to avoid rate limits.
+        """
+
+        print(f"\n{'=' * 80}")
+        print(f"PARALLEL EVAL: Running {len(questions)} questions (max 3 concurrent)")
+        print(f"{'=' * 80}\n")
+
+        # Semaphore to limit concurrent tasks (avoid rate limits)
+        semaphore = asyncio.Semaphore(3)
+
+        async def run_single(question: Question, idx: int) -> tuple[int, Question, AgentResult]:
+            async with semaphore:
+                agent = Agent(
+                    database=database,
+                    edgar_user_agent=self.edgar_user_agent,
+                    client=self.client,
+                    max_iter=self.max_iter,
+                    verbose=verbose,
+                    skip_sync=skip_sync
+                )
+
+                start_time = time.time()
+                result = await agent.run(query=question.question)
+                execution_time = time.time() - start_time
+
+                uncached_input_tokens = agent.usage.uncached_prompt_tokens
+                cached_input_tokens = agent.usage.cached_prompt_tokens
+                output_tokens = agent.usage.completion_tokens + agent.usage.thinking_tokens
+
+                cost = calculate_cost(
+                    uncached_input_tokens=uncached_input_tokens,
+                    cached_input_tokens=cached_input_tokens,
+                    output_tokens=output_tokens,
+                    model=self.client.model,
+                    provider=self.client.provider
+                )
+
+                agent_result = AgentResult(
+                    answer=result or "No response",
+                    execution_time_seconds=execution_time,
+                    cost_usd=cost,
+                    input_tokens=agent.usage.input_tokens,
+                    output_tokens=output_tokens,
+                    num_iter=agent.num_iter
+                )
+
+                return (idx, question, agent_result)
+
+        # Launch all tasks
+        tasks = [run_single(q, i) for i, q in enumerate(questions)]
+
+        # Track results and stats
+        results_by_idx = {}
+        completed = 0
+        total_cost = 0.0
+        correct_count = 0
+
+        # Process as they complete
+        for coro in asyncio.as_completed(tasks):
+            idx, question, agent_result = await coro
+            results_by_idx[idx] = agent_result
+            completed += 1
+            total_cost += agent_result.cost_usd
+
+            # Print completion info
+            print(f"\n{'─' * 80}")
+            print(f"✓ Completed [{completed}/{len(questions)}] - Question: {question.id}")
+            print(f"{'─' * 80}")
+            print(f"Answer: {agent_result.answer}")
+            print(f"Time: {agent_result.execution_time_seconds:.2f}s | Cost: ${agent_result.cost_usd:.4f} | "
+                  f"Tokens: {agent_result.input_tokens:,} in / {agent_result.output_tokens:,} out | "
+                  f"Iterations: {agent_result.num_iter}")
+
+            # Grade immediately
+            print(f"\n🔍 Grading answer...")
+            is_correct, notes = await self.evaluator.evaluate(
+                question=question.question,
+                provided_answer=agent_result.answer,
+                actual_answer=question.ground_truth
             )
 
-            start_time = time.time()
-            result = await agent.run(query=question.question)
-            execution_time = time.time() - start_time
+            if is_correct:
+                correct_count += 1
+                print(f"✅ CORRECT")
+            else:
+                print(f"❌ INCORRECT")
 
-            uncached_input_tokens = agent.usage.uncached_prompt_tokens
-            cached_input_tokens = agent.usage.cached_prompt_tokens
-            output_tokens = agent.usage.completion_tokens + agent.usage.thinking_tokens
+            print(f"Expected: {question.ground_truth}")
+            print(f"Notes: {notes}")
+            print(f"\nRunning Score: {correct_count}/{completed} ({correct_count / completed:.1%})")
+            print(f"Running Total Cost: ${total_cost:.4f}")
+            print(f"{'─' * 80}\n")
 
-            cost = calculate_cost(
-                uncached_input_tokens=uncached_input_tokens,
-                cached_input_tokens=cached_input_tokens,
-                output_tokens=output_tokens,
-                model=self.client.model,
-                provider=self.client.provider
-            )
+        # Return results in original question order
+        results = [results_by_idx[i] for i in range(len(questions))]
 
-            return AgentResult(
-                answer=result or "No response",
-                execution_time_seconds=execution_time,
-                cost_usd=cost,
-                input_tokens=agent.usage.input_tokens,
-                output_tokens=output_tokens,
-                num_iter=agent.num_iter
-            )
-
-        results = await asyncio.gather(*[run_single(q) for q in questions])
+        print(f"\n{'=' * 80}")
+        print(f"PARALLEL EVAL COMPLETE")
+        print(f"Total Questions: {len(questions)}")
+        print(f"Final Score: {correct_count}/{len(questions)} ({correct_count / len(questions):.1%})")
+        print(f"Total Cost: ${total_cost:.4f}")
+        print(f"{'=' * 80}\n")
 
         return results
 
@@ -320,16 +383,16 @@ class EvalRunner:
             self,
             questions: List[Question],
             answers: List[str]
-    ) -> List[bool]:
-        """Grade all answers in parallel"""
+    ) -> List[tuple[bool, str]]:
+        """Grade all answers in parallel, returning (is_correct, notes) tuples"""
 
-        async def grade_single(question: Question, answer: str) -> bool:
-            is_correct, _ = await self.evaluator.evaluate(
+        async def grade_single(question: Question, answer: str) -> tuple[bool, str]:
+            is_correct, notes = await self.evaluator.evaluate(
                 question=question.question,
                 provided_answer=answer,
                 actual_answer=question.ground_truth
             )
-            return is_correct
+            return (is_correct, notes)
 
         grades = await asyncio.gather(*[
             grade_single(q, a) for q, a in zip(questions, answers)
@@ -343,20 +406,24 @@ class EvalRunner:
 
     def _save_markdown_report(self, eval_run: EvalRun, path: Path):
         """Save human-readable markdown report"""
-        model_info = f"**Model**: {eval_run.model} ({eval_run.provider})"
-        if eval_run.reasoning_effort:
-            model_info += f" | **Reasoning**: {eval_run.reasoning_effort}"
-        model_info += f" | **Temp**: {eval_run.temperature} | **Tier**: {eval_run.tier} | **Max Iter**: {eval_run.max_iter}"
-
-        perf_info = f"**Total Cost**: ${eval_run.total_cost_usd:.2f} | **Avg Time**: {eval_run.avg_execution_time_seconds:.1f}s | **Tokens**: {eval_run.total_input_tokens:,} in / {eval_run.total_output_tokens:,} out"
+        # Calculate averages
+        avg_cost = eval_run.total_cost_usd / eval_run.total_questions if eval_run.total_questions else 0
+        avg_tokens_in = eval_run.total_input_tokens / eval_run.total_questions if eval_run.total_questions else 0
+        avg_tokens_out = eval_run.total_output_tokens / eval_run.total_questions if eval_run.total_questions else 0
+        avg_iter = sum(r.num_iter for r in eval_run.results) / eval_run.total_questions if eval_run.total_questions else 0
 
         lines = [
             f"# {eval_run.dataset_name}",
-            f"📊 **{eval_run.correct_count}/{eval_run.total_questions} PASSED** ({eval_run.accuracy:.1%}) | **Mode**: {eval_run.eval_mode.upper()} | **Run**: {eval_run.run_timestamp}",
-            "",
-            model_info,
             f"**Grader**: {eval_run.grader_model}",
-            perf_info,
+            "",
+            f"**Model**: {eval_run.model} ({eval_run.provider}) | **Temp**: {eval_run.temperature} | **Reasoning**: {eval_run.reasoning_effort} | **Max Iter**: {eval_run.max_iter}",
+            f"**Mode**: {eval_run.eval_mode.upper()} | **Run**: {eval_run.run_timestamp}",
+            "",
+            "",
+            f"**Accuracy**: {eval_run.correct_count}/{eval_run.total_questions} ({eval_run.accuracy:.1%})",
+            f"**Total Cost**: ${eval_run.total_cost_usd:.4f} | **Avg Cost**: ${avg_cost:.4f}",
+            f"**Avg Time**: {eval_run.avg_execution_time_seconds:.2f}s | **Avg Iter**: {avg_iter:.1f}",
+            f"**Avg Tokens In**: {avg_tokens_in:,.0f} | **Avg Tokens Out**: {avg_tokens_out:,.0f}",
             "",
             "---",
             ""
@@ -381,6 +448,7 @@ class EvalRunner:
                 "```",
                 "",
                 f"**AI Grade**: {status} {'CORRECT' if result.correct else 'INCORRECT'}",
+                f"**Grader Notes**: {result.grader_notes}",
                 "",
                 f"**Performance**: {result.execution_time_seconds:.1f}s | ${result.cost_usd:.4f} | {result.input_tokens:,} in / {result.output_tokens:,} out | iter={result.num_iter}",
                 "",

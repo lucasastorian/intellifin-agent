@@ -3,11 +3,11 @@ import openai
 from jiter import from_json
 from openai import AsyncStream
 from typing import Literal, List
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from agent.actions import BaseAction
 from agent.message import Message, Action, Thought, WebSearch
 from agent.clients.base_client import BaseClient
-from utils.retry import retry
 
 
 class OpenAIClient(BaseClient):
@@ -62,11 +62,15 @@ class OpenAIClient(BaseClient):
         return await self._stream_with_retry(params)
 
     @retry(
-        attempts=3,
-        base_delay=1.0,
-        backoff=2.0,
-        jitter=(0.1, 0.5),
-        retry_on=(openai.APIError, openai.BadRequestError, openai.APIConnectionError, openai.RateLimitError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1.0, min=1.0, max=10.0),
+        retry=retry_if_exception_type((
+            openai.APIError,
+            openai.BadRequestError,
+            openai.APIConnectionError,
+            openai.RateLimitError
+        )),
+        reraise=True
     )
     async def _stream_with_retry(self, params: dict):
         """Create and consume a streaming response with minimal retries."""

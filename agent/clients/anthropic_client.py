@@ -1,8 +1,10 @@
 import json
+import httpx
 import anthropic
 from jiter import from_json
 from anthropic import AsyncStream
 from typing import Literal, List
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from agent.actions import BaseAction
 from agent.message import Message, Action, Thought
@@ -12,7 +14,6 @@ from database.utils.rate_limiters.token_limiter import TokenRateLimiter
 
 
 class AnthropicClient(BaseClient):
-
     provider: str = "Anthropic"
     max_tokens: int = 16384
     betas: List[str] = ["interleaved-thinking-2025-05-14"]
@@ -33,15 +34,13 @@ class AnthropicClient(BaseClient):
             "none": 0
         }[self.reasoning_effort]
 
-        self.client = anthropic.AsyncAnthropic()
+        self.client = anthropic.AsyncAnthropic(timeout=60)
 
         limits = get_rate_limits("anthropic", tier, model)
         self.rate_limiter = TokenRateLimiter(
             max_tokens=limits["tokens_per_minute"],
             period=60
         )
-
-        self.tool_call_arguments = ""
 
     async def stream(self, messages: List[Message], system_prompt: str, actions: List[BaseAction],
                      allowed_actions: List[BaseAction] = None, enable_web_search: bool = False):
@@ -71,20 +70,38 @@ class AnthropicClient(BaseClient):
             params["tools"] = [action.anthropic_schema for action in allowed_actions]
             params['tool_choice'] = {"type": "tool"}
 
-        # Use rate limiter context manager (like VoyageClient pattern)
         async with self.rate_limiter.context(estimated_tokens) as update_func:
-            response = await self.client.beta.messages.create(**params)
-            result = await self.stream_completion(response=response)
-
-            # Update with actual input tokens from response
+            result = await self._stream_with_retry(params=params)
             if hasattr(result, 'prompt_tokens') and result.prompt_tokens:
                 update_func(result.prompt_tokens)
 
             return result
 
-    async def stream_completion(self, response: AsyncStream):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1.0, min=1.0, max=10.0),
+        retry=retry_if_exception_type((
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError,
+            anthropic.APIError
+        )),
+        reraise=True
+    )
+    async def _stream_with_retry(self, params: dict):
+        """Anthropic streaming call with sane timeouts and retries."""
+        response = await self.client.beta.messages.create(**params)
+        result = await self.stream_completion(response=response)
+
+        return result
+
+    @staticmethod
+    async def stream_completion(response: AsyncStream):
         """Streams the Anthropic Completion"""
         completion = Message(role="assistant", status="in_progress", content="", thoughts=[], actions=[])
+
+        tool_call_arguments = ""
 
         async for event in response:
 
@@ -99,7 +116,7 @@ class AnthropicClient(BaseClient):
                     pass
 
                 elif event.content_block.type == 'tool_use':
-                    self.tool_call_arguments = ""
+                    tool_call_arguments = ""
                     action = Action(id=event.content_block.id, name=event.content_block.name,
                                     status="streaming", body={})
                     completion.actions.append(action)
@@ -112,9 +129,9 @@ class AnthropicClient(BaseClient):
                     completion.thoughts[-1].id += event.delta.signature
 
                 elif event.delta.type == 'input_json_delta':
-                    self.tool_call_arguments += event.delta.partial_json
+                    tool_call_arguments += event.delta.partial_json
                     try:
-                        body_json = from_json((self.tool_call_arguments.strip() or "{}").encode(),
+                        body_json = from_json((tool_call_arguments.strip() or "{}").encode(),
                                               partial_mode="trailing-strings")
                     except ValueError:
                         continue
