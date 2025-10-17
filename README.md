@@ -30,6 +30,34 @@ a self-building retrieval stack that turns the entire SEC universe into a struct
 
 ---
 
+## **Quick Start**
+
+```bash
+git clone https://github.com/lucasastorian/intellifin-agent.git
+cd intellifin-agent
+pip install -r requirements.txt
+
+export OPENAI_API_KEY=sk-...
+export VOYAGE_API_KEY=...
+```
+
+### **Example**
+
+```bash
+python main.py \
+  --query "What was Palantir’s revenue CAGR from 2021–2024?" \
+  --edgar-user-agent "Your Name <email@example.com>"
+```
+
+### **Reproduce Benchmarks**
+
+```bash
+python run_eval.py --model gpt-5
+# Results saved to eval_results/run_YYYY-MM-DD_HH-MM-SS/
+```
+
+---
+
 ## **The Intellifin Index**
 
 A continuously expanding, context-aware search index built automatically from SEC data.
@@ -72,34 +100,6 @@ We corrected **4 incorrect answers** and refined outdated questions; full detail
 | **Delta EPS guidance**         | “YoY growth %”                | Absolute $ range ($6–$7 EPS)               |
 
 Corrections make the benchmark measure reasoning, not tolerance for flawed ground truth.
-
----
-
-## **Quick Start**
-
-```bash
-git clone https://github.com/lucasastorian/intellifin-agent.git
-cd intellifin-agent
-pip install -r requirements.txt
-
-export OPENAI_API_KEY=sk-...
-export VOYAGE_API_KEY=...
-```
-
-### **Example**
-
-```bash
-python main.py \
-  --query "What was Palantir’s revenue CAGR from 2021–2024?" \
-  --edgar-user-agent "Your Name <email@example.com>"
-```
-
-### **Reproduce Benchmarks**
-
-```bash
-python run_eval.py --model gpt-5
-# Results saved to eval_results/run_YYYY-MM-DD_HH-MM-SS/
-```
 
 ---
 
