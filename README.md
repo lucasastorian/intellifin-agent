@@ -35,24 +35,36 @@ a self-building retrieval stack that turns the entire SEC universe into a struct
 ```bash
 git clone https://github.com/lucasastorian/intellifin-agent.git
 cd intellifin-agent
+
+# Create a virtual environment (strongly recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 pip install -r requirements.txt
 
-export OPENAI_API_KEY=sk-...
-export VOYAGE_API_KEY=...
+# Copy .env.example and add your API keys
+cp .env.example .env
+# Edit .env and add at minimum:
+#   OPENAI_API_KEY=sk-...
+#   VOYAGE_API_KEY=...
+# Other keys (ANTHROPIC_API_KEY, GEMINI_API_KEY, FMP_API_KEY) are optional
 ```
 
 ### **Example**
 
 ```bash
 python main.py \
-  --query "What was Palantir’s revenue CAGR from 2021–2024?" \
-  --edgar-user-agent "Your Name <email@example.com>"
+  --query "What was Palantir's revenue CAGR from 2021–2024?" \
+  --user-agent "Your Name <email@example.com>"
 ```
 
 ### **Reproduce Benchmarks**
 
 ```bash
-python run_eval.py --model gpt-5
+python run_eval.py \
+  --model gpt-5 \
+  --edgar-user-agent "Your Name <email@example.com>"
+
 # Results saved to eval_results/run_YYYY-MM-DD_HH-MM-SS/
 ```
 
