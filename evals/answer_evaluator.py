@@ -61,4 +61,4 @@ class Evaluator:
         )
 
         evaluation = response.output_parsed
-        return (evaluation.answer_correct == 'Yes', evaluation.notes)
+        return evaluation.answer_correct == 'Yes', evaluation.notes

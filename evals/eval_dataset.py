@@ -7,7 +7,7 @@ from pydantic import BaseModel
 class EvalMode(Enum):
     """Evaluation mode for handling dataset issues"""
     ORIGINAL = "original"      # As published - no changes
-    UPDATED = "updated"        # Fix only outdated answers (time-based changes)
+    UPDATED = "updated"        # Fix outdated + added_precision (time-based changes + evaluator precision)
     STANDARD = "standard"      # Fix outdated + incorrect + structurally_invalid (all corrections)
     STRICT = "strict"          # Fix everything + revised Q for ambiguous
 
@@ -35,7 +35,7 @@ class EvalDataset(BaseModel):
             path: Path to YAML dataset file
             mode: EvalMode determining which questions/answers to use
                 - ORIGINAL: As published - no changes
-                - UPDATED: Fix only outdated answers (time-based changes)
+                - UPDATED: Fix outdated + added_precision (time-based changes + evaluator precision issues)
                 - STANDARD: Fix outdated + incorrect + structurally_invalid (all corrections) (default)
                 - STRICT: Fix everything + revised Q for ambiguous
 
@@ -58,7 +58,7 @@ class EvalDataset(BaseModel):
 
             elif mode == EvalMode.UPDATED:
                 question = item['question']
-                if issue_type == 'outdated':
+                if issue_type in ['outdated', 'added_precision']:
                     ground_truth = item['ground_truth']
                 else:
                     ground_truth = item.get('original_ground_truth', item['ground_truth'])

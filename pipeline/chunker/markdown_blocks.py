@@ -3,8 +3,6 @@ import voyageai
 from abc import ABC
 from typing import List, Optional
 
-
-# Shared Voyage tokenizer instance
 _voyage_client: Optional[voyageai.Client] = None
 _voyage_model = "voyage-3.5-lite"
 
