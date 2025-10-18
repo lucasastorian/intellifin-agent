@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 from database import Database
 from evals.eval_runner import EvalRunner
-from utils import get_client
+from utils import get_client, validate_api_keys
 from evals.eval_dataset import EvalMode
 from evals.answer_evaluator import Evaluator
 from schema import schema
@@ -122,5 +122,8 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
+
+    # Validate API keys before running
+    validate_api_keys(model=args.model)
 
     asyncio.run(main(args=args))

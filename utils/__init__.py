@@ -3,11 +3,13 @@ from utils.get_client import get_client
 from utils.print_messages import print_messages
 from utils.financial_statement_merger import FinancialStatementMerger
 from utils.run_summary import print_run_summary
+from utils.validate_api_keys import validate_api_keys
 
 __all__ = [
     "get_client",
     "presync_tickers",
     "print_messages",
     "print_run_summary",
-    "FinancialStatementMerger"
+    "FinancialStatementMerger",
+    "validate_api_keys"
 ]

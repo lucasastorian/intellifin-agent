@@ -9,7 +9,7 @@ from agent.agent import Agent
 from database import Database
 from schema import schema
 from utils.print_messages import print_messages
-from utils import print_run_summary, presync_tickers, get_client
+from utils import print_run_summary, presync_tickers, get_client, validate_api_keys
 from pipeline.company_provisioner import CompanyProvisioner
 from utils.supress_warnings import suppress_edgar_no_xbrl_warnings, suppress_pyrate_limiter_warnings
 
@@ -79,6 +79,9 @@ if __name__ == '__main__':
     #                     help='Syncs the ticker symbols for fast access / more accurate benchmarks')
 
     args = parser.parse_args()
+
+    # Validate API keys before running
+    validate_api_keys(model=args.model)
 
     run_agent(query=args.query, user_agent=args.user_agent, model=args.model, max_iter=args.max_iter,
               reasoning_effort=args.reasoning_effort, run_presync=False, tickers=None)

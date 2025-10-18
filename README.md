@@ -5,9 +5,10 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **92 % accuracy on the Finance Agent validation set** —
-> a **37-point gain** over the previous best (55 %) using the *same models*.
+> **92% accuracy on the Finance Agent validation set** (80% without corrections) —
+> a **37-point gain** over the previous best (55%) using the *same models*.
 > Powered by structured data, SOA vector embeddings, and an agentic RAG architecture.
+> **Fully reproducible.** See [corrections.md](corrections.md) for benchmark corrections context.
 
 ---
 
@@ -93,7 +94,7 @@ Coverage: the **entire U.S. listed-equity universe**, updated on demand as filin
 | **Claude 4.5 Sonnet (Finance Agent)** |   55 %   |     $1.41    |    130   |
 
 **Same model, new infrastructure:** +27 points accuracy / –84 % cost.
-Intellifin retrieves only what’s relevant—no more 100-page context windows.
+Intellifin retrieves only what's relevant—no more 100-page context windows.
 
 ---
 
