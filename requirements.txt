@@ -54,7 +54,7 @@ openai==2.1.0
 orjson==3.11.3
 packaging==25.0
 pandas==2.3.3
-pillow==11.3.0
+pillow==12.1.1
 platformdirs==4.5.0
 propcache==0.3.2
 pyarrow==21.0.0
